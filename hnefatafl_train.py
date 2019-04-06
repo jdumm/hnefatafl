@@ -1,7 +1,7 @@
 """
-A two player version of Hnefatafl, a Viking board game.
+An extension of Hnefatafl to include AI training, AI vs AI, and Player vs AI (attacker or defender) modes.
 
-A full description of the game can be found here: http://tinyurl.com/2lpvjb
+A full description of the game can be found here: https://en.wikipedia.org/wiki/Tafl_games
 
 Author: Jon Dumm
 Date: 4/4/2019
@@ -24,15 +24,15 @@ import hnefatafl as tafl
 def run_game_hahd(screen):
     """ Start a human vs human game
     """
-    run_game(screen)
+    tafl.run_game(screen)
 
-def run_game_hacd(screen):
+def run_game_hacd(screen,defender_model=None):
     """ Start a human attacker vs computer defender game
     """
     #run_game(screen)
     pass
 
-def run_game_cahd(screen):
+def run_game_cahd(screen,attacker_model=None):
     """ Start a computer attacker vs human defender game
     """
     #run_game(screen)
@@ -41,13 +41,11 @@ def run_game_cahd(screen):
 def run_game_random(screen=None):
 
     """Start a new game with random (legal) moves.
-
-    TODO: Add description
-
+       TODO: Remove?  I think it's no longer needed.
     """
     board = tafl.Board()
     move = tafl.Move()
-    talf.initialize_pieces(board)
+    tafl.initialize_pieces(board)
     num_moves = 0
     while 1:
         for event in pygame.event.get():
@@ -56,15 +54,6 @@ def run_game_random(screen=None):
             if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                pass
         
-        '''
-        if move.a_turn:
-            text = "Attacker's Turn: Move {}".format(num_moves)
-            print(text)
-        if not move.a_turn:
-            text = "Defender's Turn: Move {}".format(num_moves)
-            print(text)
-        '''
-        #print(move.to_array())
         do_random_move(move)
         num_moves += 1
         if(num_moves >= 1000):
@@ -88,31 +77,27 @@ def run_game_random(screen=None):
             print(text)
             return False
         if screen is not None:
-            talf.update_image(screen, board, move, text)
+            tafl.update_image(screen, board, move, text)
             pygame.display.update()
         #time.sleep(1)
 
 def do_random_move(move):
+    """ Purely random but legal moves
+    """ 
     if move.a_turn:
         pieces = tafl.Attackers
     else:
         pieces = tafl.Defenders
     while 1:
-        #rn = int(random.random() * len(pieces.sprites()))
-        #piece = pieces.sprites()[rn]
         piece = random.choice(pieces.sprites())
         move.select(piece)
         tafl.Current.add(piece)
-        #print("Piece at: {} {}".format(piece.x_tile,piece.y_tile))
-        #print("  Valid Moves: {}".format(move.vm))
         if len(move.vm)==0:
-            #print("No valid moves...")
             move.select(piece)
             tafl.Current.empty()
             continue
         else:
             pos = random.choice(tuple(move.vm))
-            #print("Moving piece to: {}".format(pos))
             if move.is_valid_move(pos, tafl.Current.sprites()[0], True):
                 if tafl.Current.sprites()[0] in tafl.Kings:
                     move.king_escaped(tafl.Kings)
@@ -124,10 +109,79 @@ def do_random_move(move):
                 tafl.Current.empty()
             break
 
-def run_game_cacd_RL(attacker_model,defender_model,screen=None):
-    """Start and run one game of computer vs computer hnefatafl.
+def do_mostly_random_but_strike_to_kill_move(move): 
+    """ Very basic rules for defender logic.  King moves to escape or next-to-escape tiles if an option.
+        And in 10% of moves, the king tries to move away from the center.  
+    """ 
 
-    TODO: Add description
+    if move.a_turn:
+        pieces = tafl.Attackers
+    else:
+        # If King can win, do it.
+        for king in tafl.Kings:
+            move.select(king)
+            tafl.Current.add(king)
+            for pos in [(0,0),(0,10),(10,0),(10,10), (0,1),(1,0),(0,9),(1,10),(10,1),(9,0),(10,9),(9,10)]:
+                if pos in move.vm:
+                    if move.is_valid_move(pos, tafl.Current.sprites()[0], True):
+                        move.king_escaped(tafl.Kings)
+                    if move.a_turn:
+                        move.remove_pieces(tafl.Defenders, tafl.Attackers, tafl.Kings)
+                    else:
+                        move.remove_pieces(tafl.Attackers, tafl.Defenders, tafl.Kings)
+                    move.end_turn(tafl.Current.sprites()[0])
+                    tafl.Current.empty()
+                    return 
+            if random.random()<0.10: # Push King out from center if possible sometimes
+                if len(move.vm)==0: break 
+                else: 
+                    for m in move.vm:
+                        if abs(5-m[0])>3 or abs(5-m[1])>3:
+                            if move.is_valid_move(pos, tafl.Current.sprites()[0], True):
+                                move.king_escaped(tafl.Kings)
+                            if move.a_turn:
+                                move.remove_pieces(tafl.Defenders, tafl.Attackers, tafl.Kings)
+                            else:
+                                move.remove_pieces(tafl.Attackers, tafl.Defenders, tafl.Kings)
+                        move.end_turn(tafl.Current.sprites()[0])
+                        tafl.Current.empty()
+                        return 
+
+            move.select(king)
+            tafl.Current.empty()
+        pieces = tafl.Defenders
+
+    while 1:
+        piece = random.choice(pieces.sprites())
+        move.select(piece)
+        tafl.Current.add(piece)
+
+        if len(move.vm)==0:
+            move.select(piece)
+            tafl.Current.empty()
+            continue
+        else:
+            pos = random.choice(tuple(move.vm))
+            if move.is_valid_move(pos, tafl.Current.sprites()[0], True):
+                if tafl.Current.sprites()[0] in tafl.Kings:
+                    move.king_escaped(tafl.Kings)
+                if move.a_turn:
+                    move.remove_pieces(tafl.Defenders, tafl.Attackers, tafl.Kings)
+                else:
+                    move.remove_pieces(tafl.Attackers, tafl.Defenders, tafl.Kings)
+                move.end_turn(tafl.Current.sprites()[0])
+                tafl.Current.empty()
+            break
+
+
+def run_game_cacd_RL(attacker_model=None,defender_model=None,screen=None):
+    """Start and run one game of computer attacker vs computer defender hnefatafl.
+ 
+       Args:
+           attacker_model: Keras model that can '.predict' based on the game state.  Used
+                           to determine the best of available moves. Random moves by default.
+           defender_model: Same as attacker_model but for defender.  
+           screen: Optional, used to monitor matches in pygame.
 
     """
     board = tafl.Board()
@@ -146,64 +200,96 @@ def run_game_cacd_RL(attacker_model,defender_model,screen=None):
                 if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                     pass
 
-
         num_moves += 1
-        if(num_moves >= 1000):
+        if(num_moves >= 350):
             print("Draw game after {} moves".format(num_moves))
             a_predicted_scores.append(0.0)
             d_predicted_scores.append(0.0)
-            return a_game_states,a_predicted_scores[1:], d_game_states,d_predicted_scores[1:] # i.e. the corrected scores from RL
+            return a_game_states,a_predicted_scores[1:], d_game_states,d_predicted_scores[1:]
 
         if move.a_turn:
             #print("Attacker's Turn: Move {}".format(num_moves))
-            game_state,predicted_score = do_best_move(move,attacker_model)
-            a_game_states.append(game_state)
-            a_predicted_scores.append(predicted_score)
+            if attacker_model is None:
+                game_state = do_random_move(move)
+                predicted_score = (random.random()-0.5) * 2
+                a_game_states.append(game_state)
+                a_predicted_scores.append(predicted_score)
+            else:
+                game_state,predicted_score = do_best_move(move,attacker_model,sample_frac=0.50)
+                a_game_states.append(game_state)
+                a_predicted_scores.append(predicted_score)
         else:
             #print("Defender's Turn: Move {}".format(num_moves))
-            #game_state,predicted_score = do_best_move(move,defender_model)
-            game_state = do_random_move(move)
-            predicted_score = (random.random()-0.5) * 2
-            d_game_states.append(game_state)
-            d_predicted_scores.append(predicted_score)
+            if defender_model is None: 
+                game_state = do_mostly_random_but_strike_to_kill_move(move)
+                predicted_score = (random.random()-0.5) * 2
+                d_game_states.append(game_state)
+                d_predicted_scores.append(predicted_score)
+            else:
+                game_state,predicted_score = do_best_move(move,defender_model,sample_frac=0.50)
+                d_game_states.append(game_state)
+                d_predicted_scores.append(predicted_score)
 
         """Text to display on bottom of game."""
+        if screen is not None:
+            tafl.update_image(screen, board, move, "Red: {}".format(len(tafl.Attackers.sprites())), "Blue: {}".format(len(tafl.Defenders.sprites())))
+            pygame.display.update()
         if move.escaped:
             print("King escaped! Defenders win!")
-            attacker_outcome = -1.0
-            #print(a_predicted_scores[-1])
             a_predicted_scores.append(-1.0)
             d_predicted_scores.append(+1.0)
             return a_game_states,a_predicted_scores[1:], d_game_states,d_predicted_scores[1:] # i.e. the corrected scores from RL
         if move.king_killed:
             print("King killed! Attackers win!")
-            #print(a_predicted_scores[-1])
             a_predicted_scores.append(+1.0)
             d_predicted_scores.append(-1.0)
             return a_game_states,a_predicted_scores[1:], d_game_states,d_predicted_scores[1:] # i.e. the corrected scores from RL
-        if screen is not None:
-            tafl.update_image(screen, board, move, "", "")
-            pygame.display.update()
 
 
 
-def do_best_move(move,model):
-    """ Function to try all possible moves and select the best according to the model provided
+def do_best_move(move,model,sample_frac=1.0):
+    """ Function to try all possible moves and select the best according to the model provided.
+
+        Args: 
+              move: talf game state and valid moves.
+              model: Keras model used for predicting all possible moves.
+              sample_frac: Fraction of pieces AND fraction of their moves to consider, for speed.
+                           Default 1.0 considers all possible pieces and moves.
     """
 
     game_state = game_state_to_array() # Preserves the current game state
 
     if move.a_turn:
         pieces = tafl.Attackers
+        king = (tafl.Kings.sprites()[0].x_tile, tafl.Kings.sprites()[0].y_tile)
     else:
         pieces = tafl.Defenders
+        # If King can win, do it.
+        for king in tafl.Kings:
+            move.select(king)
+            tafl.Current.add(king)
+            for pos in [(0,0),(0,10),(10,0),(10,10), (0,1),(1,0),(0,9),(1,10),(10,1),(9,0),(10,9),(9,10)]:
+                if pos in move.vm:
+                    if move.is_valid_move(pos, tafl.Current.sprites()[0], True):
+                        move.king_escaped(tafl.Kings)
+                    if move.a_turn:
+                        move.remove_pieces(tafl.Defenders, tafl.Attackers, tafl.Kings)
+                    else:
+                        move.remove_pieces(tafl.Attackers, tafl.Defenders, tafl.Kings)
+                    move.end_turn(tafl.Current.sprites()[0])
+                    tafl.Current.empty()
+                    return game_state,1.0
+            move.select(king)
+            tafl.Current.empty()
+
+    if(len(pieces)==0): return game_state,0.0
 
     best_score = -1.0
-    best_piece = None
+    best_piece = pieces.sprites()[0]
     best_move = None
     best_game_state = None
-    #len("N Pieces: ",len(pieces))
     for piece in pieces:
+        if random.random() > sample_frac: continue
         move.select(piece) # Move class defines all possible valid moves
         tafl.Current.add(piece)
         if len(move.vm)==0: # No valid moves for this piece, move on
@@ -212,6 +298,12 @@ def do_best_move(move,model):
             continue
         else:
             for m in move.vm:
+                if move.a_turn and move.kill_king(king[0],king[1],pieces,m[0],m[1]): # Move would kill king, do it.
+                    best_score = 1.0
+                    best_piece = piece
+                    best_move = m
+                    break
+                if random.random() > sample_frac: continue
                 # Swap game state for candidate move
                 temp = game_state[piece.x_tile][piece.y_tile]
                 game_state[piece.x_tile][piece.y_tile] = 0
@@ -223,7 +315,7 @@ def do_best_move(move,model):
                     score = -1.0
                     #score = random.random()
 
-                if score > best_score:
+                if score >= best_score:
                     best_score = score
                     best_piece = piece
                     best_move  = m
@@ -235,9 +327,11 @@ def do_best_move(move,model):
         move.select(piece) # Deselect
         tafl.Current.empty()
 
+    if best_piece is None or best_move is None: return game_state,0.0
+
     move.select(best_piece)
     tafl.Current.add(best_piece)
-    #print("Moving piece to: {}".format(pos))
+
     if move.is_valid_move(best_move,tafl.Current.sprites()[0], True):
         if tafl.Current.sprites()[0] in tafl.Kings:
             move.king_escaped(tafl.Kings)
@@ -247,8 +341,8 @@ def do_best_move(move,model):
             move.remove_pieces(tafl.Attackers, tafl.Defenders, tafl.Kings)
         move.end_turn(tafl.Current.sprites()[0])
         tafl.Current.empty()
-        #return best_score,game_state_to_array()
-        # Just do this by hand for efficiency
+
+        # Just update the game state here for efficiency
         temp = game_state[best_piece.x_tile][best_piece.y_tile]
         game_state[best_piece.x_tile][best_piece.y_tile] = 0
         game_state[best_move[0]][best_move[1]] = temp
@@ -261,28 +355,32 @@ def do_best_move(move,model):
 
 
 def initialize_random_nn_model():
+    """ Initialize Keras Deep Neural Networks models and print summary.
+    """
+    print("Initializing randomized NN model")
+    model = Sequential()
+    model.add(Dense(2*11*11, input_dim=11*11,kernel_initializer='normal', activation='relu'))
+    model.add(Dropout(0.1))
+    model.add(Dense(11*11, kernel_initializer='normal',activation='relu'))
+    model.add(Dropout(0.1))
+    # Adding more test layers
 
-        print("Initializing randomized NN model")
-        model = Sequential()
-        model.add(Dense(2*11*11, input_dim=11*11,kernel_initializer='normal', activation='relu'))
-        model.add(Dropout(0.1))
-        model.add(Dense(11*11, kernel_initializer='normal',activation='relu'))
-        model.add(Dropout(0.1))
-        # model.add(Dense(9, kernel_initializer='normal',activation='relu'))
-        # model.add(Dropout(0.1))
-        # model.add(Dense(5, kernel_initializer='normal',activation='relu'))
-        model.add(Dense(1,kernel_initializer='normal'))
+    model.add(Dense(9, kernel_initializer='normal',activation='relu'))
+    model.add(Dropout(0.1))
+    model.add(Dense(5, kernel_initializer='normal',activation='relu'))
 
-        learning_rate = 0.001
-        momentum = 0.8
+    model.add(Dense(1,kernel_initializer='normal'))
 
-        sgd = SGD(lr=learning_rate, momentum=momentum, nesterov=False)
-        model.compile(loss='mean_squared_error', optimizer=sgd)
-        model.summary()
-        return model
+    learning_rate = 0.001
+    momentum = 0.8
+
+    sgd = SGD(lr=learning_rate, momentum=momentum, nesterov=False)
+    model.compile(loss='mean_squared_error', optimizer=sgd)
+    model.summary()
+    return model
 
 def game_state_to_array():
-    """2D Numpy array representation of game state for ML model.
+    """ 2D Numpy array representation of game state for ML model.
     """
     if tafl.Attackers is None or tafl.Defenders is None or tafl.Kings is None:
         print("Game not properly initialized.  Exiting.")
@@ -299,21 +397,29 @@ def game_state_to_array():
     return arr
 
 def unison_shuffled_copies(a, b):
+    """ Used to shuffle the game states and corrected scores before retraining.
+    """
     assert len(a) == len(b)
     p = np.random.permutation(len(a))
     return a[p], b[p]
 
-def smooth_corrected_scores(corrected_scores,num_to_smooth=10):
-    """ Smooth out the lead up to the final state for faster learning
+def smooth_corrected_scores(corrected_scores,num_to_smooth=50):
+    """ Smooth out the lead up to the final state for faster learning.
+        I tried a number of strategies for speeding up training...
     """
-    num_to_smooth = min(num_to_smooth ,len(corrected_scores))
-    
+    num_to_smooth = min(num_to_smooth, len(corrected_scores))
     for i in range(num_to_smooth-1):
-        corrected_scores[-1*(i+2)] = (corrected_scores[-1*(i+2)] + corrected_scores[-1*(i+1)]) / 2. # Average
+        corrected_scores[-1*(i+2)] = (corrected_scores[-1*(i+2)] + 2*corrected_scores[-1*(i+1)]) / 3. # weighted average
 
 def main():
-    """Main function- initializes screen and starts new games."""
-    interactive = True 
+    """Main training loop."""
+
+    # True to display the pygame screen to watch the game
+    interactive = True
+    # True to Update the attacker/defender models as you go
+    train_attacker = False
+    train_defender = False
+
     if interactive:
         pygame.init()
         screen = pygame.display.set_mode(tafl.WINDOW_SIZE)
@@ -321,28 +427,44 @@ def main():
         screen = None
     tafl.initialize_groups()
 
-    #attacker_model = initialize_random_nn_model()
-    attacker_model = load_model('attacker_model_after_340_games.h5')
-    defender_model = initialize_random_nn_model()
+    # Set to 0 to initialize random DNNs (-1 for defender has some basic rules) or used to load saved models:
+    attacker_load   = 6420
+    defender_load   = 6420
+    num_train_games = 0
+    version         = 4  # Used to track major changes/restarts
 
-    #train = True
-    num_train_games = 340
-    #while train:
-    while num_train_games < 10000:
+    if attacker_load==0: attacker_model = initialize_random_nn_model()
+    else:                attacker_model = load_model('models/attacker_model_after_{}_games_pass{}.h5'.format(attacker_load,version))
+
+    if defender_load == -1:  defender_model = None  # Defaults to mostly random + some extra King movements
+    elif defender_load == 0: defender_model = initialize_random_nn_model()
+    else:                    defender_model = load_model('models/defender_model_after_{}_games_pass{}.h5'.format(defender_load,version))
+
+    while num_train_games < 100000:
         num_train_games += 1
-        #play = tafl.run_game(screen)
-        #play = run_game_cacd(screen)
-        #a_game_states,a_corrected_scores, d_game_states,d_corrected_scores = run_game_cacd_RL(attacker_model,defender_model)
-        a_game_states,a_corrected_scores, d_game_states,d_corrected_scores = run_game_cacd_RL(attacker_model,defender_model,screen)
-        #play = run_game_cacd_RL(attacker_model,defender_model,screen)
-        print("Game finished in {} moves".format(len(a_corrected_scores)+len(d_corrected_scores)))
-        #a_game_states,a_corrected_scores = unison_shuffled_copies(a_game_states,a_corrected_scores)
-        smooth_corrected_scores(a_corrected_scores)
-        attacker_model.fit(np.array(a_game_states).reshape(-1,11*11),np.array(a_corrected_scores),epochs=1,batch_size=1,verbose=0)
-        if(num_train_games%10==0):
-            attacker_model.save('attacker_model_after_{}_games.h5'.format(num_train_games))
 
-        #time.sleep(5)
+        #play = tafl.run_game(screen)
+        a_game_states,a_corrected_scores, d_game_states,d_corrected_scores = run_game_cacd_RL(attacker_model,defender_model,screen)
+
+        # Just some basic debugging to monitor how the training is progressing:
+        print("{}, {}, {}, {}".format(num_train_games,len(a_corrected_scores)+len(d_corrected_scores),a_corrected_scores[-5:],d_corrected_scores[-5:]))
+
+        a_game_states,a_corrected_scores = unison_shuffled_copies(np.array(a_game_states),np.array(a_corrected_scores))
+        d_game_states,d_corrected_scores = unison_shuffled_copies(np.array(d_game_states),np.array(d_corrected_scores))
+
+        if train_attacker and attacker_model is not None:
+            smooth_corrected_scores(a_corrected_scores,num_to_smooth=max(20,int(len(a_corrected_scores)/1.)))
+            attacker_model.fit(np.array(a_game_states).reshape(-1,11*11),np.array(a_corrected_scores),epochs=1,batch_size=1,verbose=0)
+        if train_defender and defender_model is not None:
+            smooth_corrected_scores(d_corrected_scores,num_to_smooth=max(20,int(len(d_corrected_scores)/1.)))
+            defender_model.fit(np.array(d_game_states).reshape(-1,11*11),np.array(d_corrected_scores),epochs=1,batch_size=1,verbose=0)
+        if(num_train_games%20==0):
+            print('--- num games played: {}'.format(num_train_games))
+            if train_attacker: attacker_model.save('models/attacker_model_after_{}_games_pass{}.h5'.format(num_train_games,version))
+            if train_defender: defender_model.save('models/defender_model_after_{}_games_pass{}.h5'.format(num_train_games,version))
+
+        if interactive:
+            time.sleep(2)
         tafl.cleanup()
 
 if __name__ == '__main__':

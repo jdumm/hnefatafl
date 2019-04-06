@@ -164,7 +164,7 @@ class Move(object):
         for a in captured:
             a.kill()
 
-    def kill_king(self, x, y, attackers):
+    def kill_king(self, x, y, attackers,test_x=None,test_y=None):
         """Determine if the king has been killed.
 
         The king is killed if it is surrounded on all four sides by attacking
@@ -186,6 +186,8 @@ class Move(object):
                     attack_pts.add((a.x_tile, a.y_tile))
                 except KeyError:
                     pass
+        if test_x is not None and test_y is not None:
+            attack_pts.add((test_x, test_y))
         kill_pts.difference_update(attack_pts)
         if not kill_pts:
             return True
@@ -540,10 +542,10 @@ def update_image(screen, board, move, text, text2):
 
     """Write which player's turn it is on the bottom of the window."""
     font = pygame.font.Font(None, 36)
-    msg = font.render(text, 1, (0, 0, 0))
+    msg = font.render(text, 1, (1, 0, 0))
     msgpos = msg.get_rect()
     if text2:
-        msg2 = font.render(text2, 1, (0, 0, 0))
+        msg2 = font.render(text2, 1, (0, 1, 0))
         msgpos2 = msg2.get_rect()
         msgpos.centerx = screen.get_rect().centerx
         msgpos.centery = ((HEIGHT - WIDTH) / 7) + WIDTH
