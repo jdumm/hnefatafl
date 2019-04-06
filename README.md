@@ -39,7 +39,7 @@ The text on the bottom will tell you whose turn it is (red is the attacker, blue
 The game is not quite finished yet. It cannot detect if there is a draw game. Other than that, it is fully functional.
 
 # AI training Using Reinforcement Learning
-Keras Deep Neural Nets are used to predict the score (-1 = very bad to +1 = very good) of any given game board state (current arrangment of pieces) for possible future moves and performing the best move.  These DNNs are initialized with random values and learn through adversarial self play.  When a game is finished, the states leading up to the final outcome are scored more highly/lowly for the team who won/lost.  These DNNs are updated after each game, learning from their mistakes.  These trained AIs can be saved and reloaded.  
+Keras Deep Neural Nets are used to predict the score (-1 = very bad to +1 = very good) of any given game board state (current arrangment of pieces) for possible future moves.  These DNNs are initialized with random values and learn through adversarial self play.  When a game is finished, the states leading up to the final outcome are scored more highly/lowly for the team who won/lost.  These DNNs are updated after each game, learning from their mistakes.  These trained AIs can be saved and reloaded.  
 
 I followed the basic approach outlined in a [Kaggle notebook on self-learning Tic-Tac-Toe](https://www.kaggle.com/dhanushkishore/a-self-learning-tic-tac-toe-program/notebook), though I alter more just than the last state leading up to a win since hnefatafl takes many more turns to complete.
 
