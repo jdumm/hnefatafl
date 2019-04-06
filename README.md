@@ -1,5 +1,5 @@
 # Context
-The Player vs Player version of this game and some description below was forked from: [slowen/hnefatafl](https://github.com/slowen/hnefatafl).  The original source file has only minor modifcations.  The purpose of this repo is to build Attacker and Defender AIs through Reinforcement Learning.  These AIs can continue to learn by playing each other or versus a Player.
+The Player vs Player version of this game and some description below was forked from: [slowen/hnefatafl](https://github.com/slowen/hnefatafl).  The original source file has only minor modifications.  The purpose of this repo is to build Attacker and Defender AIs through Reinforcement Learning.  These AIs can continue to learn by playing each other or versus a Player.
 
 # Hnefatafl
 
