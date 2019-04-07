@@ -230,7 +230,7 @@ def run_game(attacker_model=None,defender_model=None,human_attacker=False,human_
             d_predicted_scores.append(+1.0)
             tafl.update_image(screen, board, move, text, text2)
             pygame.display.flip()
-            play = end_game_loop(move)
+            if human_attacker or human_defender: play = end_game_loop(move)
             return play,a_game_states,a_predicted_scores[1:], d_game_states,d_predicted_scores[1:] # i.e. the corrected scores from RL
         if move.king_killed:
             text = "King killed! Attackers win!"
@@ -240,7 +240,7 @@ def run_game(attacker_model=None,defender_model=None,human_attacker=False,human_
             d_predicted_scores.append(-1.0)
             tafl.update_image(screen, board, move, text, text2)
             pygame.display.flip()
-            play = end_game_loop(move)
+            if human_attacker or human_defender: play = end_game_loop(move)
             return play,a_game_states,a_predicted_scores[1:], d_game_states,d_predicted_scores[1:] # i.e. the corrected scores from RL
         if move.restart:
             return play,a_game_states,a_predicted_scores[1:], d_game_states,d_predicted_scores[1:] # i.e. the corrected scores from RL
