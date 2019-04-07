@@ -21,23 +21,6 @@ from tensorflow.keras.models import load_model
 import hnefatafl as tafl
 
 
-def run_game_hahd(screen):
-    """ Start a human vs human game
-    """
-    tafl.run_game(screen)
-
-def run_game_hacd(screen,defender_model=None):
-    """ Start a human attacker vs computer defender game
-    """
-    #run_game(screen)
-    pass
-
-def run_game_cahd(screen,attacker_model=None):
-    """ Start a computer attacker vs human defender game
-    """
-    #run_game(screen)
-    pass
-
 def run_game_random(screen=None):
 
     """Start a new game with random (legal) moves.
@@ -78,7 +61,7 @@ def run_game_random(screen=None):
             return False
         if screen is not None:
             tafl.update_image(screen, board, move, text)
-            pygame.display.update()
+            pygame.display.flip()
         #time.sleep(1)
 
 def do_random_move(move):
@@ -174,7 +157,7 @@ def do_mostly_random_but_strike_to_kill_move(move):
             break
 
 
-def run_game_cacd_RL(attacker_model=None,defender_model=None,screen=None):
+def run_game(attacker_model=None,defender_model=None,human_attacker=False,human_defender=False,screen=None):
     """Start and run one game of computer attacker vs computer defender hnefatafl.
  
        Args:
@@ -191,59 +174,160 @@ def run_game_cacd_RL(attacker_model=None,defender_model=None,screen=None):
     a_predicted_scores = []
     d_game_states = []
     d_predicted_scores = []
+    play = True
     num_moves = 0
     while 1:
+        num_moves += 1
+        """Text to display on bottom of game."""
+        if screen is not None and not human_attacker and not human_defender:
+            tafl.update_image(screen, board, move, "Red: {}".format(len(tafl.Attackers.sprites())), "Blue: {}".format(len(tafl.Defenders.sprites())))
         if screen is not None:
             for event in pygame.event.get():
                 if event.type == QUIT:
                     sys.exit()
                 if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                     pass
-
-        num_moves += 1
         if(num_moves >= 350):
             print("Draw game after {} moves".format(num_moves))
             a_predicted_scores.append(0.0)
             d_predicted_scores.append(0.0)
-            return a_game_states,a_predicted_scores[1:], d_game_states,d_predicted_scores[1:]
+            return play,a_game_states,a_predicted_scores[1:], d_game_states,d_predicted_scores[1:]
 
         if move.a_turn:
             #print("Attacker's Turn: Move {}".format(num_moves))
-            if attacker_model is None:
+            if human_attacker:
+                play = do_human_turn(screen, board, move)
+            elif attacker_model is None:
                 game_state = do_random_move(move)
                 predicted_score = (random.random()-0.5) * 2
                 a_game_states.append(game_state)
                 a_predicted_scores.append(predicted_score)
             else:
+                if human_defender: time.sleep(0.5)
                 game_state,predicted_score = do_best_move(move,attacker_model,sample_frac=0.50)
                 a_game_states.append(game_state)
                 a_predicted_scores.append(predicted_score)
         else:
             #print("Defender's Turn: Move {}".format(num_moves))
-            if defender_model is None: 
+            if human_defender:
+                play = do_human_turn(screen, board, move)
+            elif defender_model is None: 
                 game_state = do_mostly_random_but_strike_to_kill_move(move)
                 predicted_score = (random.random()-0.5) * 2
                 d_game_states.append(game_state)
                 d_predicted_scores.append(predicted_score)
             else:
+                if human_attacker: time.sleep(0.5)
                 game_state,predicted_score = do_best_move(move,defender_model,sample_frac=0.50)
                 d_game_states.append(game_state)
                 d_predicted_scores.append(predicted_score)
 
-        """Text to display on bottom of game."""
-        if screen is not None:
-            tafl.update_image(screen, board, move, "Red: {}".format(len(tafl.Attackers.sprites())), "Blue: {}".format(len(tafl.Defenders.sprites())))
-            pygame.display.update()
         if move.escaped:
-            print("King escaped! Defenders win!")
+            text = "King escaped! Defenders win!"
+            print(text)
+            text2 = "Play again? y/n"
             a_predicted_scores.append(-1.0)
             d_predicted_scores.append(+1.0)
-            return a_game_states,a_predicted_scores[1:], d_game_states,d_predicted_scores[1:] # i.e. the corrected scores from RL
+            tafl.update_image(screen, board, move, text, text2)
+            pygame.display.flip()
+            play = end_game_loop(move)
+            return play,a_game_states,a_predicted_scores[1:], d_game_states,d_predicted_scores[1:] # i.e. the corrected scores from RL
         if move.king_killed:
-            print("King killed! Attackers win!")
+            text = "King killed! Attackers win!"
+            print(text)
+            text2 = "Play again? y/n"
             a_predicted_scores.append(+1.0)
             d_predicted_scores.append(-1.0)
-            return a_game_states,a_predicted_scores[1:], d_game_states,d_predicted_scores[1:] # i.e. the corrected scores from RL
+            tafl.update_image(screen, board, move, text, text2)
+            pygame.display.flip()
+            play = end_game_loop(move)
+            return play,a_game_states,a_predicted_scores[1:], d_game_states,d_predicted_scores[1:] # i.e. the corrected scores from RL
+        if move.restart:
+            return play,a_game_states,a_predicted_scores[1:], d_game_states,d_predicted_scores[1:] # i.e. the corrected scores from RL
+
+def end_game_loop(move):
+    while 1:  # Wait for human input
+        for event in pygame.event.get():
+            if event.type == QUIT:
+                sys.exit()
+            if event.type == pygame.KEYDOWN:
+                if move.game_over and event.key == pygame.K_n:
+                    return False
+                if move.game_over and event.key == pygame.K_y:
+                    return True
+
+
+def do_human_turn(screen,board,move):
+    print("Starting human turn")
+    current_turn = move.a_turn
+
+    while 1:  # Wait for human input
+        for event in pygame.event.get():
+            if event.type == QUIT:
+                sys.exit()
+            if event.type == pygame.KEYDOWN:
+                if move.game_over and event.key == pygame.K_n:
+                    return False
+                if move.game_over and event.key == pygame.K_y:
+                    return True
+                if move.restart and event.key == pygame.K_n:
+                    move.restart = False
+                if move.restart and event.key == pygame.K_y:
+                    return True
+                if event.key == pygame.K_r:
+                    move.restart = True
+            if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                pos = pygame.mouse.get_pos()
+                if move.game_over:
+                    pass
+                elif move.restart:
+                    pass
+                elif not move.selected:
+                    if move.a_turn:
+                        for piece in tafl.Attackers:
+                            if piece.rect.collidepoint(pos):
+                                move.select(piece)
+                                tafl.Current.add(piece)
+                    else:
+                        for piece in tafl.Defenders:
+                            if piece.rect.collidepoint(pos):
+                                move.select(piece)
+                                tafl.Current.add(piece)
+
+                else:
+                    if tafl.Current.sprites()[0].rect.collidepoint(pos):
+                        move.select(tafl.Current.sprites()[0])
+                        tafl.Current.empty()
+                        #pygame.display.flip()
+                    elif move.is_valid_move(pos, tafl.Current.sprites()[0]):
+                        if tafl.Current.sprites()[0] in tafl.Kings:
+                            move.king_escaped(tafl.Kings)
+                        if move.a_turn:
+                            move.remove_pieces(tafl.Defenders, tafl.Attackers, tafl.Kings)
+                        else:
+                            move.remove_pieces(tafl.Attackers, tafl.Defenders, tafl.Kings)
+                        move.end_turn(tafl.Current.sprites()[0])
+                        tafl.Current.empty()
+
+        """Text to display on bottom of game."""
+        text2 = None
+        if move.a_turn:
+            text = "Attacker's Turn"
+        if not move.a_turn:
+            text = "Defender's Turn"
+        #if move.escaped:
+        #    text = "King escaped! Defenders win!"
+        #    text2 = "Play again? y/n"
+        #if move.king_killed:
+        #    text = "King killed! Attackers win!"
+        #    text2 = "Play again? y/n"
+        if move.restart:
+            text = "Restart game? y/n"
+        tafl.update_image(screen, board, move, text, text2)
+        pygame.display.flip()
+
+        if current_turn != move.a_turn: # turn ended
+            return True
 
 
 
@@ -414,11 +498,22 @@ def smooth_corrected_scores(corrected_scores,num_to_smooth=50):
 def main():
     """Main training loop."""
 
+    # TODO: Add command line option parsing.
+    # True to let human players play
+    human_attacker = False
+    human_defender = False
     # True to display the pygame screen to watch the game
-    interactive = True
+    interactive = human_attacker or human_defender or True
     # True to Update the attacker/defender models as you go
-    train_attacker = False
-    train_defender = False
+    train_attacker = True
+    train_defender = True
+
+    if human_attacker and train_attacker:
+        print("Conflicting options human_attacker={} and train_attacker={}. Exiting.".format(human_attacker,train_attacker))
+        sys.exit(1)
+    if human_defender and train_defender:
+        print("Conflicting options human_defender={} and train_defender={}. Exiting.".format(human_defender,train_defender))
+        sys.exit(1)
 
     if interactive:
         pygame.init()
@@ -427,36 +522,41 @@ def main():
         screen = None
     tafl.initialize_groups()
 
-    # Set to 0 to initialize random DNNs (-1 for defender has some basic rules) or used to load saved models:
-    attacker_load   = 6420
-    defender_load   = 6420
     num_train_games = 0
     version         = 4  # Used to track major changes/restarts
 
-    if attacker_load==0: attacker_model = initialize_random_nn_model()
-    else:                attacker_model = load_model('models/attacker_model_after_{}_games_pass{}.h5'.format(attacker_load,version))
+    attacker_model = None
+    if not human_attacker:
+        # Set to 0 to initialize random DNNs or used to load saved models:
+        attacker_load   = 6420
+        if attacker_load==0: attacker_model = initialize_random_nn_model()
+        else:                attacker_model = load_model('models/attacker_model_after_{}_games_pass{}.h5'.format(attacker_load,version))
 
-    if defender_load == -1:  defender_model = None  # Defaults to mostly random + some extra King movements
-    elif defender_load == 0: defender_model = initialize_random_nn_model()
-    else:                    defender_model = load_model('models/defender_model_after_{}_games_pass{}.h5'.format(defender_load,version))
+    defender_model = None
+    if not human_defender:
+        # Set to 0 to initialize random DNNs (-1 for defender has some basic rules) or used to load saved models:
+        defender_load   = 6420
+        #if defender_load == -1:  defender_model = None  # Defaults to mostly random + some extra King movements
+        if defender_load == 0: defender_model = initialize_random_nn_model()
+        else:                  defender_model = load_model('models/defender_model_after_{}_games_pass{}.h5'.format(defender_load,version))
 
-    while num_train_games < 100000:
+    play = True
+    while play:
         num_train_games += 1
 
-        #play = tafl.run_game(screen)
-        a_game_states,a_corrected_scores, d_game_states,d_corrected_scores = run_game_cacd_RL(attacker_model,defender_model,screen)
+        play, a_game_states,a_corrected_scores, d_game_states,d_corrected_scores = \
+          run_game(attacker_model,defender_model,human_attacker,human_defender,screen)
 
         # Just some basic debugging to monitor how the training is progressing:
         print("{}, {}, {}, {}".format(num_train_games,len(a_corrected_scores)+len(d_corrected_scores),a_corrected_scores[-5:],d_corrected_scores[-5:]))
 
-        a_game_states,a_corrected_scores = unison_shuffled_copies(np.array(a_game_states),np.array(a_corrected_scores))
-        d_game_states,d_corrected_scores = unison_shuffled_copies(np.array(d_game_states),np.array(d_corrected_scores))
-
-        if train_attacker and attacker_model is not None:
+        if train_attacker and attacker_model is not None and len(a_corrected_scores)>0:
             smooth_corrected_scores(a_corrected_scores,num_to_smooth=max(20,int(len(a_corrected_scores)/1.)))
+            a_game_states,a_corrected_scores = unison_shuffled_copies(np.array(a_game_states),np.array(a_corrected_scores))
             attacker_model.fit(np.array(a_game_states).reshape(-1,11*11),np.array(a_corrected_scores),epochs=1,batch_size=1,verbose=0)
-        if train_defender and defender_model is not None:
+        if train_defender and defender_model is not None and len(d_corrected_scores)>0:
             smooth_corrected_scores(d_corrected_scores,num_to_smooth=max(20,int(len(d_corrected_scores)/1.)))
+            d_game_states,d_corrected_scores = unison_shuffled_copies(np.array(d_game_states),np.array(d_corrected_scores))
             defender_model.fit(np.array(d_game_states).reshape(-1,11*11),np.array(d_corrected_scores),epochs=1,batch_size=1,verbose=0)
         if(num_train_games%20==0):
             print('--- num games played: {}'.format(num_train_games))
@@ -465,7 +565,10 @@ def main():
 
         if interactive:
             time.sleep(2)
+        if num_train_games >= 100000: play = False
+
         tafl.cleanup()
+
 
 if __name__ == '__main__':
     main()
