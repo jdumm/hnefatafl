@@ -228,8 +228,9 @@ def run_game(attacker_model=None,defender_model=None,human_attacker=False,human_
             text2 = "Play again? y/n"
             a_predicted_scores.append(-1.0)
             d_predicted_scores.append(+1.0)
-            tafl.update_image(screen, board, move, text, text2)
-            pygame.display.flip()
+            if screen:
+                tafl.update_image(screen, board, move, text, text2)
+                pygame.display.flip()
             if human_attacker or human_defender: play = end_game_loop(move)
             return play,a_game_states,a_predicted_scores[1:], d_game_states,d_predicted_scores[1:] # i.e. the corrected scores from RL
         if move.king_killed:
@@ -238,8 +239,9 @@ def run_game(attacker_model=None,defender_model=None,human_attacker=False,human_
             text2 = "Play again? y/n"
             a_predicted_scores.append(+1.0)
             d_predicted_scores.append(-1.0)
-            tafl.update_image(screen, board, move, text, text2)
-            pygame.display.flip()
+            if screen:
+                tafl.update_image(screen, board, move, text, text2)
+                pygame.display.flip()
             if human_attacker or human_defender: play = end_game_loop(move)
             return play,a_game_states,a_predicted_scores[1:], d_game_states,d_predicted_scores[1:] # i.e. the corrected scores from RL
         if move.restart:
@@ -321,10 +323,10 @@ def do_human_turn(screen,board,move):
         #if move.king_killed:
         #    text = "King killed! Attackers win!"
         #    text2 = "Play again? y/n"
-        if move.restart:
+        if move.restart and screen:
             text = "Restart game? y/n"
-        tafl.update_image(screen, board, move, text, text2)
-        pygame.display.flip()
+            tafl.update_image(screen, board, move, text, text2)
+            pygame.display.flip()
 
         if current_turn != move.a_turn: # turn ended
             return True
@@ -503,7 +505,7 @@ def main():
     human_attacker = False
     human_defender = False
     # True to display the pygame screen to watch the game
-    interactive = human_attacker or human_defender or True
+    interactive = human_attacker or human_defender or False
     # True to Update the attacker/defender models as you go
     train_attacker = True
     train_defender = True

@@ -47,5 +47,14 @@ Additional dependencies for the AI models are:
 * keras with tensorflow backend
 * numpy
 
+# Train module
+The training module can be executed using:
+```
+python hnefatafl_train.py
+```
+
+Options can be configured in the main() function for different modes, including Player vs AI Attacker or AI Defender.  If models are configured to be trained, then they are updated after each game but only saved every 20 games (default setting).  After training, saved models can be loaded quite simply.
+
+
 # Resources
 If you want to learn more about Hnefatafl, check out http://tafl.cyningstan.com/. It explains the game really well and has some great advice on strategy for both sides.  [Wikipedia](https://en.wikipedia.org/wiki/Tafl_games) describes the interesting history and many variations.  
