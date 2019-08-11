@@ -40,18 +40,18 @@ def run_game_random(screen=None):
         do_random_move(move)
         num_moves += 1
         if(num_moves >= 1000):
-            print("Draw game after {} moves".format(num_moves))
+            print("--- Draw game after {} moves".format(num_moves))
             return False
 
         """Text to display on bottom of game."""
         text2 = None
         if move.escaped:
-            text = "King escaped! Defenders win!"
+            text = "--- King escaped! Defenders win!"
             print(text)
             text2 = "Play again? y/n"
             return False
         if move.king_killed:
-            text = "King killed! Attackers win!"
+            text = "--- King killed! Attackers win!"
             print(text)
             text2 = "Play again? y/n"
             return False
@@ -223,7 +223,7 @@ def run_game(attacker_model=None,defender_model=None,human_attacker=False,human_
                 d_predicted_scores.append(predicted_score)
 
         if move.escaped:
-            text = "King escaped! Defenders win!"
+            text = "--- King escaped! Defenders win!"
             print(text)
             text2 = "Play again? y/n"
             a_predicted_scores.append(-1.0)
@@ -234,7 +234,7 @@ def run_game(attacker_model=None,defender_model=None,human_attacker=False,human_
             if human_attacker or human_defender: play = end_game_loop(move)
             return play,a_game_states,a_predicted_scores[1:], d_game_states,d_predicted_scores[1:] # i.e. the corrected scores from RL
         if move.king_killed:
-            text = "King killed! Attackers win!"
+            text = "--- King killed! Attackers win!"
             print(text)
             text2 = "Play again? y/n"
             a_predicted_scores.append(+1.0)
@@ -325,8 +325,8 @@ def do_human_turn(screen,board,move):
         #    text2 = "Play again? y/n"
         if move.restart and screen:
             text = "Restart game? y/n"
-            tafl.update_image(screen, board, move, text, text2)
-            pygame.display.flip()
+        tafl.update_image(screen, board, move, text, text2)
+        pygame.display.flip()
 
         if current_turn != move.a_turn: # turn ended
             return True
@@ -505,12 +505,12 @@ def main():
     human_attacker = False
     human_defender = False
     # True to display the pygame screen to watch the game
-    interactive = human_attacker or human_defender or False
+    interactive = human_attacker or human_defender or True
     # True to Update the attacker/defender models as you go
-    train_attacker = True
-    train_defender = True
+    train_attacker = False 
+    train_defender = False # Freeze defender AI until attacker catches up.
 
-    if human_attacker and train_attacker:
+    if human_attacker and train_attacker: # Sorry, I can't train humans
         print("Conflicting options human_attacker={} and train_attacker={}. Exiting.".format(human_attacker,train_attacker))
         sys.exit(1)
     if human_defender and train_defender:
@@ -522,35 +522,44 @@ def main():
         screen = pygame.display.set_mode(tafl.WINDOW_SIZE)
     else:
         screen = None
+
     tafl.initialize_groups()
 
-    num_train_games = 0
+    num_train_games_attacker = 455700
+    num_train_games_defender = 100000
     version         = 4  # Used to track major changes/restarts
 
     attacker_model = None
     if not human_attacker:
         # Set to 0 to initialize random DNNs or used to load saved models:
-        attacker_load   = 6420
+        #attacker_load   = 0
+        attacker_load   = num_train_games_attacker
         if attacker_load==0: attacker_model = initialize_random_nn_model()
         else:                attacker_model = load_model('models/attacker_model_after_{}_games_pass{}.h5'.format(attacker_load,version))
 
     defender_model = None
     if not human_defender:
         # Set to 0 to initialize random DNNs (-1 for defender has some basic rules) or used to load saved models:
-        defender_load   = 6420
+        #defender_load   = 0
+        defender_load   = num_train_games_defender
         #if defender_load == -1:  defender_model = None  # Defaults to mostly random + some extra King movements
         if defender_load == 0: defender_model = initialize_random_nn_model()
         else:                  defender_model = load_model('models/defender_model_after_{}_games_pass{}.h5'.format(defender_load,version))
 
     play = True
     while play:
-        num_train_games += 1
+        if train_attacker: num_train_games_attacker += 1
+        if train_defender: num_train_games_defender += 1
 
         play, a_game_states,a_corrected_scores, d_game_states,d_corrected_scores = \
           run_game(attacker_model,defender_model,human_attacker,human_defender,screen)
 
         # Just some basic debugging to monitor how the training is progressing:
-        print("{}, {}, {}, {}".format(num_train_games,len(a_corrected_scores)+len(d_corrected_scores),a_corrected_scores[-5:],d_corrected_scores[-5:]))
+        #print("{}, {}, {}, {}".format(max(num_train_games_attacker,num_train_games_defender),len(a_corrected_scores)+len(d_corrected_scores),a_corrected_scores[-10:],d_corrected_scores[-10:]))
+        print( """Attacker has played:     {} games,\nDefender has played:     {} games,\nNum moves this game:     {},\nLast 10 Attacker states: {},\nLast 10 Defender States: {}"""
+              .format(num_train_games_attacker,num_train_games_defender,len(a_corrected_scores)+len(d_corrected_scores),
+                      ' '.join(['{:0.2f}'.format(entry) for entry in a_corrected_scores[-10:]]),
+                      ' '.join(['{:0.2f}'.format(entry) for entry in d_corrected_scores[-10:]])))
 
         if train_attacker and attacker_model is not None and len(a_corrected_scores)>0:
             smooth_corrected_scores(a_corrected_scores,num_to_smooth=max(20,int(len(a_corrected_scores)/1.)))
@@ -560,14 +569,14 @@ def main():
             smooth_corrected_scores(d_corrected_scores,num_to_smooth=max(20,int(len(d_corrected_scores)/1.)))
             d_game_states,d_corrected_scores = unison_shuffled_copies(np.array(d_game_states),np.array(d_corrected_scores))
             defender_model.fit(np.array(d_game_states).reshape(-1,11*11),np.array(d_corrected_scores),epochs=1,batch_size=1,verbose=0)
-        if(num_train_games%20==0):
-            print('--- num games played: {}'.format(num_train_games))
-            if train_attacker: attacker_model.save('models/attacker_model_after_{}_games_pass{}.h5'.format(num_train_games,version))
-            if train_defender: defender_model.save('models/defender_model_after_{}_games_pass{}.h5'.format(num_train_games,version))
+        if(max(num_train_games_attacker,num_train_games_defender)%50==0):  # Save every 50 games
+            #print('--- num games played: {}'.format(max(num_train_games_attacker,num_train_games_defender)))
+            if train_attacker: attacker_model.save('models/attacker_model_after_{}_games_pass{}.h5'.format(num_train_games_attacker,version))
+            if train_defender: defender_model.save('models/defender_model_after_{}_games_pass{}.h5'.format(num_train_games_defender,version))
 
         if interactive:
             time.sleep(2)
-        if num_train_games >= 100000: play = False
+        if max(num_train_games_attacker,num_train_games_defender) >= 1000000: play = False
 
         tafl.cleanup()
 
