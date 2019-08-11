@@ -20,6 +20,30 @@ from tensorflow.keras.optimizers import SGD
 from tensorflow.keras.models import load_model
 import hnefatafl as tafl
 
+class StatsTracker():
+    def __init__(self,n_games_window=100):
+        self.n_games_window = int(n_games_window)
+        self.a_outcomes = [] # +1 for Attacker win, 0 = draw, -1 for Attacker loss
+    def __str__(self):
+        if len(self.a_outcomes)==0:
+            return "Insufficient games tracked for StatsTracker."
+        else:
+            return """Attacker win rate is {:0.4f} over the last {} games, {:0.4f} over total of {} games.
+        Draw rate is {:0.4f} over the last {} games, {:0.4f} over total of {} games.""".format(
+              self.a_win_rate_window(), len(self.a_outcomes[-1*self.n_games_window:]),
+              self.a_win_rate_tot(), len(self.a_outcomes),
+              self.draw_rate_tot(), len(self.a_outcomes[-1*self.n_games_window:]),
+              self.draw_rate_window(), len(self.a_outcomes))
+    def a_win_rate_tot(self):
+        return sum([1 if outcome> 0. else 0 for outcome in self.a_outcomes])/float(len(self.a_outcomes))
+    def a_win_rate_window(self):
+        return sum([1 if outcome> 0. else 0 for outcome in self.a_outcomes[-1*self.n_games_window:]])/float(len(self.a_outcomes[-1*self.n_games_window:]))
+    def draw_rate_tot(self):
+        return sum([1 if outcome==0. else 0 for outcome in self.a_outcomes])/float(len(self.a_outcomes))
+    def draw_rate_window(self):
+        return sum([1 if outcome==0. else 0 for outcome in self.a_outcomes[-1*self.n_games_window:]])/float(len(self.a_outcomes[-1*self.n_games_window:]))
+    def add_attacker_outcome(self,a_score): # +1 = Attacker wins, 0 = draw, or -1 = Defender wins
+        self.a_outcomes.append(a_score)
 
 def run_game_random(screen=None):
 
@@ -501,6 +525,7 @@ def main():
     """Main training loop."""
 
     # TODO: Add command line option parsing.
+
     # True to let human players play
     human_attacker = False
     human_defender = False
@@ -508,7 +533,9 @@ def main():
     interactive = human_attacker or human_defender or True
     # True to Update the attacker/defender models as you go
     train_attacker = False 
-    train_defender = False # Freeze defender AI until attacker catches up.
+    train_defender = False
+
+    cache_model_every = 50 # games
 
     if human_attacker and train_attacker: # Sorry, I can't train humans
         print("Conflicting options human_attacker={} and train_attacker={}. Exiting.".format(human_attacker,train_attacker))
@@ -546,6 +573,8 @@ def main():
         if defender_load == 0: defender_model = initialize_random_nn_model()
         else:                  defender_model = load_model('models/defender_model_after_{}_games_pass{}.h5'.format(defender_load,version))
 
+    stats = StatsTracker(100)
+
     play = True
     while play:
         if train_attacker: num_train_games_attacker += 1
@@ -561,6 +590,10 @@ def main():
                       ' '.join(['{:0.2f}'.format(entry) for entry in a_corrected_scores[-10:]]),
                       ' '.join(['{:0.2f}'.format(entry) for entry in d_corrected_scores[-10:]])))
 
+        # Add Attacker outcome to the StatsTracker
+        stats.add_attacker_outcome(a_corrected_scores[-1])
+        print(stats)
+
         if train_attacker and attacker_model is not None and len(a_corrected_scores)>0:
             smooth_corrected_scores(a_corrected_scores,num_to_smooth=max(20,int(len(a_corrected_scores)/1.)))
             a_game_states,a_corrected_scores = unison_shuffled_copies(np.array(a_game_states),np.array(a_corrected_scores))
@@ -569,14 +602,14 @@ def main():
             smooth_corrected_scores(d_corrected_scores,num_to_smooth=max(20,int(len(d_corrected_scores)/1.)))
             d_game_states,d_corrected_scores = unison_shuffled_copies(np.array(d_game_states),np.array(d_corrected_scores))
             defender_model.fit(np.array(d_game_states).reshape(-1,11*11),np.array(d_corrected_scores),epochs=1,batch_size=1,verbose=0)
-        if(max(num_train_games_attacker,num_train_games_defender)%50==0):  # Save every 50 games
+        if(max(num_train_games_attacker,num_train_games_defender)%cache_model_every==0):  # Save every cache_model_every games
             #print('--- num games played: {}'.format(max(num_train_games_attacker,num_train_games_defender)))
             if train_attacker: attacker_model.save('models/attacker_model_after_{}_games_pass{}.h5'.format(num_train_games_attacker,version))
             if train_defender: defender_model.save('models/defender_model_after_{}_games_pass{}.h5'.format(num_train_games_defender,version))
 
         if interactive:
             time.sleep(2)
-        if max(num_train_games_attacker,num_train_games_defender) >= 1000000: play = False
+        if max(num_train_games_attacker,num_train_games_defender) >= 1000000: play = False # Hardcoded cutoff just to make sure things don't go too crazy.
 
         tafl.cleanup()
 
