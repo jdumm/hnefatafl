@@ -284,7 +284,7 @@ def end_game_loop(move):
 
 
 def do_human_turn(screen,board,move):
-    print("Starting human turn")
+    #print("Starting human turn")
     current_turn = move.a_turn
 
     while 1:  # Wait for human input
@@ -506,6 +506,25 @@ def game_state_to_array():
 
     return arr
 
+def expand_game_states_symmetries(game_states):
+    """ Equivalent game states include all 4 rotations by 90 deg,
+        as well as the 4 rotations of the mirror symmetry.
+        This returns an expanded list of game states that is
+        8x larger than the original!  Yeah, faster learning!
+    """
+    # Append all possible 90deg rotations:
+    game_states_temp = [np.rot90(gs) for gs in game_states]
+    game_states = np.concatenate((game_states,game_states_temp))
+    game_states_temp = [np.rot90(gs) for gs in game_states_temp]
+    game_states = np.concatenate((game_states,game_states_temp))
+    game_states_temp = [np.rot90(gs) for gs in game_states_temp]
+    game_states = np.concatenate((game_states,game_states_temp))
+
+    # Now mirror all possible rotations
+    game_states_temp = [np.flip(gs,axis=0) for gs in game_states]
+    game_states = np.concatenate((game_states,game_states_temp))
+    return game_states
+
 def unison_shuffled_copies(a, b):
     """ Used to shuffle the game states and corrected scores before retraining.
     """
@@ -530,12 +549,12 @@ def main():
     human_attacker = False
     human_defender = False
     # True to display the pygame screen to watch the game
-    interactive = human_attacker or human_defender or True
+    interactive = human_attacker or human_defender or False
     # True to Update the attacker/defender models as you go
-    train_attacker = False 
-    train_defender = False
+    train_attacker = True
+    train_defender = True
 
-    cache_model_every = 50 # games
+    cache_model_every = 100 # games
 
     if human_attacker and train_attacker: # Sorry, I can't train humans
         print("Conflicting options human_attacker={} and train_attacker={}. Exiting.".format(human_attacker,train_attacker))
@@ -561,7 +580,7 @@ def main():
         # Set to 0 to initialize random DNNs or used to load saved models:
         #attacker_load   = 0
         attacker_load   = num_train_games_attacker
-        if attacker_load==0: attacker_model = initialize_random_nn_model()
+        elif: attacker_load==0: attacker_model = initialize_random_nn_model()
         else:                attacker_model = load_model('models/attacker_model_after_{}_games_pass{}.h5'.format(attacker_load,version))
 
     defender_model = None
@@ -584,24 +603,31 @@ def main():
           run_game(attacker_model,defender_model,human_attacker,human_defender,screen)
 
         # Just some basic debugging to monitor how the training is progressing:
-        #print("{}, {}, {}, {}".format(max(num_train_games_attacker,num_train_games_defender),len(a_corrected_scores)+len(d_corrected_scores),a_corrected_scores[-10:],d_corrected_scores[-10:]))
-        print( """Attacker has played:     {} games,\nDefender has played:     {} games,\nNum moves this game:     {},\nLast 10 Attacker states: {},\nLast 10 Defender States: {}"""
+        print( """Attacker has played:     {} games,\nDefender has played:     {} games,\nNum moves this game:     {},\nLast 10 Attacker states: {}\nLast 10 Defender States: {}"""
               .format(num_train_games_attacker,num_train_games_defender,len(a_corrected_scores)+len(d_corrected_scores),
                       ' '.join(['{:0.2f}'.format(entry) for entry in a_corrected_scores[-10:]]),
                       ' '.join(['{:0.2f}'.format(entry) for entry in d_corrected_scores[-10:]])))
 
         # Add Attacker outcome to the StatsTracker
-        stats.add_attacker_outcome(a_corrected_scores[-1])
-        print(stats)
+        if len(a_corrected_scores)>0:  # AI Attacker and/or defender
+            stats.add_attacker_outcome(a_corrected_scores[-1])
+            print(stats)
+        elif len(d_corrected_scores)>0: # AI defender only
+            stats.add_attacker_outcome(-1*d_corrected_scores[-1])
+            print(stats)
+        #else: # PvP stats not tracked
 
         if train_attacker and attacker_model is not None and len(a_corrected_scores)>0:
             smooth_corrected_scores(a_corrected_scores,num_to_smooth=max(20,int(len(a_corrected_scores)/1.)))
             a_game_states,a_corrected_scores = unison_shuffled_copies(np.array(a_game_states),np.array(a_corrected_scores))
-            attacker_model.fit(np.array(a_game_states).reshape(-1,11*11),np.array(a_corrected_scores),epochs=1,batch_size=1,verbose=0)
+            a_game_states = expand_game_states_symmetries(a_game_states)
+            attacker_model.fit(a_game_states.reshape(-1,11*11),np.repeat(a_corrected_scores,8,axis=0),epochs=1,batch_size=1,verbose=0)
+			
         if train_defender and defender_model is not None and len(d_corrected_scores)>0:
             smooth_corrected_scores(d_corrected_scores,num_to_smooth=max(20,int(len(d_corrected_scores)/1.)))
             d_game_states,d_corrected_scores = unison_shuffled_copies(np.array(d_game_states),np.array(d_corrected_scores))
-            defender_model.fit(np.array(d_game_states).reshape(-1,11*11),np.array(d_corrected_scores),epochs=1,batch_size=1,verbose=0)
+            d_game_states = expand_game_states_symmetries(d_game_states)
+            defender_model.fit(d_game_states.reshape(-1,11*11),np.repeat(d_corrected_scores,8),epochs=1,batch_size=1,verbose=0)
         if(max(num_train_games_attacker,num_train_games_defender)%cache_model_every==0):  # Save every cache_model_every games
             #print('--- num games played: {}'.format(max(num_train_games_attacker,num_train_games_defender)))
             if train_attacker: attacker_model.save('models/attacker_model_after_{}_games_pass{}.h5'.format(num_train_games_attacker,version))
