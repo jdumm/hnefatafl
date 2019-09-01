@@ -79,6 +79,7 @@ def run_game_random(screen=None):
             return False
 
         """Text to display on bottom of game."""
+        text  = None
         text2 = None
         if move.escaped:
             text = "--- King escaped! Defenders win!"
