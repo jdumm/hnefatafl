@@ -17,13 +17,15 @@ Players can capture their opponents pieces by sandwiching an opponents piece. Th
 The king is captured when it is enclosed on all four sides.
 
 # Running the Game
-The only imported packages are sys and pygame for the PvP version. To install pygame on Unix: 
+The only dependencies are Pygame and Click. To install both on Unix: 
 ```
 sudo apt-get install python-pygame
+pip install click
 ```
 On Mac:
 ```
 python3 -m pip install -U pygame --user
+pip install click
 ```
 
 To run the PvP game, simply run:
@@ -53,8 +55,11 @@ The training module can be executed using:
 python hnefatafl_train.py
 ```
 
-Options can be configured in the main() function for different modes, including Player vs AI Attacker or AI Defender.  If models are configured to be trained, then they are updated after each game but only saved every 20 games (default setting).  After training, saved models can be loaded quite simply.
+Options can be configured from the command line for different modes, including Player vs AI Attacker or AI Defender.  If models are configured to be trained, then they are updated after each game but only saved every 50 games (default setting).  After training, saved models can be loaded quite simply.  Explore these options using:
 
+```
+python hnefatafl_train.py --help
+```
 
 # Resources
 If you want to learn more about Hnefatafl, check out http://tafl.cyningstan.com/. It explains the game really well and has some great advice on strategy for both sides.  [Wikipedia](https://en.wikipedia.org/wiki/Tafl_games) describes the interesting history and many variations.  
