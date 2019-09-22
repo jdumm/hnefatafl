@@ -13,6 +13,7 @@ from timeit import default_timer as timer
 import pyximport; pyximport.install()
 import pygame
 from pygame.locals import *
+import click
 import time
 import random
 import numpy as np
@@ -740,22 +741,32 @@ def smooth_corrected_scores_exp(corrected_scores,dynamic=True,decay_constant=5.)
     for i in range(len(corrected_scores)-1):
         corrected_scores[-1*(i+2)] = (corrected_scores[-1*(i+2)] + math.exp(-i/decay_constant)*corrected_scores[-1*(i+1)]) / (1. + math.exp(-i/decay_constant))
 
-def main():
+@click.command()
+@click.option('-ha/-aa','--human-attacker/--ai-attacker',      default=False, help='Set to play attacker manually')
+@click.option('-hd/-ad','--human-defender/--ai-defender',      default=False, help='Set to play defender manually')
+@click.option('-i/-b',  '--interactive/--batch',               default=False, help='Set true in order to watch AI vs AI matches')
+@click.option('-ta/-na','--train-attacker/--no-train-attacker',default=False, help='Set to update attacker AI after each game')
+@click.option('-td/-nd','--train-defender/--no-train-defender',default=False, help='Set to update defender AI after each game')
+@click.option('-c',     '--cache-model-every',                 default=50,    help='Cache the Keras DNN model every so many games')
+@click.option('-s/-ns', '--use-symmetry/--no-symmetry',        default=False, help='Set to train using symmetrical board states')
+@click.option('-al',    '--attacker-load',                     default=69900, help='Attacker model file num to load')
+@click.option('-dl',    '--defender-load',                     default=-1,    help='Defender model file num to load')
+@click.option('-v',     '--version',                           default=6,     help='Model version number')
+def main(human_attacker,human_defender,interactive,train_attacker,train_defender,cache_model_every,use_symmetry,
+         attacker_load,defender_load,version):
     """Main training loop."""
-
-    # TODO: Add command line option parsing.
-
+    
     # True to let human players play
-    human_attacker = False
-    human_defender = False
+    #human_attacker = False
+    #human_defender = False
     # True to display the pygame screen to watch the game
-    interactive = human_attacker or human_defender or True
+    interactive = human_attacker or human_defender or interactive
     # True to Update the attacker/defender models as you go
-    train_attacker = True
-    train_defender = False
+    #train_attacker = True
+    #train_defender = False
 
-    cache_model_every = 50 # games
-    use_symmetrical_states = False # Method needs to be updated for 3d game states
+    #cache_model_every = 50 # games
+    #use_symmetry = False # Method needs to be updated for 3d game states
 
     if human_attacker and train_attacker: # Sorry, I can't train humans
         print("Conflicting options human_attacker={} and train_attacker={}. Exiting.".format(human_attacker,train_attacker))
@@ -772,9 +783,9 @@ def main():
 
     tafl.initialize_groups()
 
-    num_train_games_attacker = 69900
-    num_train_games_defender = 0
-    version         = 6  # Used to track major changes/restarts
+    num_train_games_attacker = attacker_load
+    num_train_games_defender = defender_load
+    #version         = 6  # Used to track major changes/restarts
 
     attacker_model = None
     if not human_attacker:
@@ -826,7 +837,7 @@ def main():
             smooth_corrected_scores_exp(a_corrected_scores)
             print( """               Smoothed: {}""".format(' '.join(['{:+0.4f}'.format(entry) for entry in a_corrected_scores[1:]])))
             a_game_states,a_corrected_scores = unison_shuffled_copies(np.array(a_game_states),np.array(a_corrected_scores))
-            if use_symmetrical_states:
+            if use_symmetry:
                 a_game_states = expand_game_states_symmetries(a_game_states)
                 a_corrected_scores = np.repeat(a_corrected_scores,8,axis=0)
             #attacker_model.fit(a_game_states.reshape(-1,11*11),a_corrected_scores,epochs=1,batch_size=1,verbose=0)
@@ -838,7 +849,7 @@ def main():
             smooth_corrected_scores_exp(d_corrected_scores)
             print( """               Smoothed: {}""".format(' '.join(['{:+0.4f}'.format(entry) for entry in d_corrected_scores[-10:]])))
             d_game_states,d_corrected_scores = unison_shuffled_copies(np.array(d_game_states),np.array(d_corrected_scores))
-            if use_symmetrical_states:
+            if use_symmetry:
                 d_game_states = expand_game_states_symmetries(d_game_states)
                 d_corrected_scores = np.repeat(d_corrected_scores,8)
             #defender_model.fit(d_game_states.reshape(-1,11*11),d_corrected_scores,epochs=1,batch_size=1,verbose=0)
