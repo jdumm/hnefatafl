@@ -14,9 +14,9 @@ from pygame.locals import *
 
 WINDOW_SIZE = WIDTH, HEIGHT = 640, 700
 MARGIN_COLOR = 128, 102, 69
-GSIZE = WIDTH // 12
-MARGIN = GSIZE // 12
-SPECIALSQS = set([(5, 5), (0, 0), (0, 10), (10, 10), (10, 0)])
+#GSIZE = WIDTH // 12
+#MARGIN = GSIZE // 12
+#SPECIALSQS = set([(5, 5), (0, 0), (0, 10), (10, 10), (10, 0)])
 
 
 class Move(object):
@@ -103,8 +103,8 @@ class Move(object):
             row = pos[0]
             col = pos[1]
         else:
-            row = pos[0] // (WIDTH // 11)
-            col = pos[1] // (WIDTH // 11)
+            row = pos[0] // (WIDTH // DIM)
+            col = pos[1] // (WIDTH // DIM)
 
         if (row, col) in self.vm:
             piece.pos_cent(row, col)
@@ -115,9 +115,9 @@ class Move(object):
             return False
 
     def king_escaped(self, Kings):
-        """Check if king has moved onto a corner square."""
+        """Check if king has moved onto a non-central special square."""
         king = (Kings.sprites()[0].x_tile, Kings.sprites()[0].y_tile)
-        if king in SPECIALSQS.difference([(5, 5)]):
+        if king in SPECIALSQS.difference([((DIM-1)//2, (DIM-1)//2)]):
             self.escaped = True
             self.game_over = True
 
@@ -230,7 +230,7 @@ class Move(object):
         temp_row = self.row + 1
         clear = True
         while clear:
-            if temp_row > 10:
+            if temp_row > DIM-1:
                 return vm
             for p in Pieces:
                 ppos = self.ppos_cent(temp_row, self.col)
@@ -278,7 +278,7 @@ class Move(object):
         temp_col = self.col + 1
         clear = True
         while clear:
-            if temp_col > 10:
+            if temp_col > DIM-1:
                 return vm
             for p in Pieces:
                 ppos = self.ppos_cent(self.row, temp_col)
@@ -296,7 +296,7 @@ class Move(object):
         Returns:
             (int): the top or left pixel location of the tile.
         """
-        return x*(GSIZE + (GSIZE // 12)) + (GSIZE // 12)
+        return x*(GSIZE + (GSIZE // (DIM+1))) + (GSIZE // (DIM+1))
 
     def ppos_cent(self, x, y):
         """Find the center pixel position of a given tile.
@@ -330,7 +330,7 @@ class Board(object):
     the Board class contains information for the look of the board.
     """
 
-    def __init__(self):
+    def __init__(self, game_name='hnefatafl'):
         """Create a playing board and color code it.
 
         Attributes:
@@ -344,17 +344,84 @@ class Board(object):
             dim (int): Dimension of the board (i.e. num of rows or cols.)
             piece (int): Size of playing piece.
         """
-        self.grid = ["x..aaaaa..x",
-                     ".....a.....",
-                     "...........",
-                     "a....d....a",
-                     "a...ddd...a",
-                     "aa.ddcdd.aa",
-                     "a...ddd...a",
-                     "a....d....a",
-                     "...........",
-                     ".....a.....",
-                     "x..aaaaa..x"]
+        global SPECIALSQS
+        global DIM
+        global GSIZE
+        global MARGIN
+        game_name = game_name.lower()
+        if game_name=='brandubh':
+            self.grid = ["x..a...x",
+                         "...a...",
+                         "...d...",
+                         "aadcdaa",
+                         "...d...",
+                         "...a...",
+                         "x..a..x"]
+        elif game_name=='ard ri' or game_name=='ardri' or game_name=='ard_ri':
+            self.grid = ["x.aaa..x",
+                         "...a...",
+                         "a.ddd.a",
+                         "aadcdaa",
+                         "a.ddd.a",
+                         "...a...",
+                         "x.aaa.x"]
+        elif game_name=='tablut':
+            self.grid = ["...aaa...",
+                         "....a....",
+                         "....d....",
+                         "a...d...a",
+                         "aaddcddaa",
+                         "a...d...a",
+                         "....d....",
+                         "....a....",
+                         "...aaa..."]
+        elif game_name=='tawlbwrdd':
+            self.grid = ["x...aaa...x",
+                         "....a.a....",
+                         ".....a.....",
+                         ".....d.....",
+                         "aa..ddd..aa",
+                         "a.addcdda.a",
+                         "aa..ddd..aa",
+                         ".....d.....",
+                         ".....a.....",
+                         "....a.a....",
+                         "x...aaa...x"]
+        elif game_name=='alea evangelii' or game_name=='aleaevangelii' or game_name=='alea_evangelii':
+            self.grid = ["x.a..a.......a..a.x",
+                         "...................",
+                         "a....a.......a....a",
+                         ".......a.a.a.......",
+                         "......a.d.d.a......",
+                         "a.a..a.......a..a.a",
+                         "....a....d....a....",
+                         "...a....d.d....a...",
+                         "....d..d.d.d..d....",
+                         "...a..d.dcd.d..a...",
+                         "....d..d.d.d..d....",
+                         "...a....d.d....a...",
+                         "....a....d....a....",
+                         "a.a..a.......a..a.a",
+                         "......a.d.d.a......",
+                         ".......a.a.a.......",
+                         "a....a.......a....a",
+                         "...................",
+                         "x.a..a.......a..a.x"]
+        else:
+            if game_name!='hnefatafl': print("WARN: Game name {} not recognized.  Defaulting to Hnefatafl!".format(game_name))
+            self.grid = ["x..aaaaa..x",
+                         ".....a.....",
+                         "...........",
+                         "a....d....a",
+                         "a...ddd...a",
+                         "aa.ddcdd.aa",
+                         "a...ddd...a",
+                         "a....d....a",
+                         "...........",
+                         ".....a.....",
+                         "x..aaaaa..x"]
+
+        SPECIALSQS = set([(len(self.grid)//2,len(self.grid)//2), (0,0), (0,len(self.grid)-1), (len(self.grid)-1,len(self.grid)-1), (len(self.grid)-1,0)])
 
         self.colors = {'x': (25, 25, 25),
                        'a': (186, 169, 85),
@@ -362,7 +429,18 @@ class Board(object):
                        'c': (242, 240, 228),
                        '.': (250, 236, 163)}
 
-        self.dim = len(self.grid)
+        if game_name =='tablut': # Special case overrides
+            SPECIALSQS = set([(len(self.grid)//2,len(self.grid)//2), (0,3), (0,4), (0,5),
+                                                                     (3,0), (4,0), (5,0),
+                                                                     (3,8), (4,8), (5,8),
+                                                                     (8,3), (8,4), (8,5),
+                                                                     (4,1), (4,7), (1,4), (7,4)])
+            self.colors['a'] = self.colors['x']
+
+        DIM = len(self.grid)
+        GSIZE = WIDTH // (DIM+1)
+        MARGIN = GSIZE // (DIM+1)
+        #self.dim = len(self.grid)
 
 
 class Piece(pygame.sprite.Sprite):
@@ -396,7 +474,7 @@ class Piece(pygame.sprite.Sprite):
         Returns:
             (int): the top or left pixel location of the tile.
         """
-        return x*(GSIZE + (GSIZE // 12)) + (GSIZE // 12)
+        return x*(GSIZE + (GSIZE // (DIM+1))) + (GSIZE // (DIM+1))
 
     def pos_cent(self, x, y):
         """Find the center pixel position of a given tile.
@@ -505,8 +583,8 @@ def initialize_pieces(board):
     Args:
         board (Board): the game board object
     """
-    for y in range(board.dim):
-        for x in range(board.dim):
+    for y in range(DIM):
+        for x in range(DIM):
             p = board.grid[y][x]
             if p == "a":
                 Attacker(x, y)
@@ -529,8 +607,8 @@ def update_image(screen, board, move, text, text2):
         move (Move): the move state data
     """
     screen.fill(MARGIN_COLOR)
-    for y in range(board.dim):
-        for x in range(board.dim):
+    for y in range(DIM):
+        for x in range(DIM):
             xywh = [x*(GSIZE + MARGIN) + MARGIN,
                     y*(GSIZE + MARGIN) + MARGIN,
                     GSIZE,
@@ -561,8 +639,8 @@ def update_image(screen, board, move, text, text2):
     pygame.display.flip()
 
 
-def run_game(screen):
-    """Start and run a new game of hnefatafl.
+def run_game(screen,game_name='hnefatafl'):
+    """Start and run a new game of game_name ('hnefatafl' by default).
 
     The game, groups, board, move info, screen, and pieces are initialized
     first. Then, the game starts. It runs in a while loop, which will exit
@@ -584,7 +662,7 @@ def run_game(screen):
     Returns:
         True if players want a new game, False o.w.
     """
-    board = Board()
+    board = Board(game_name)
     move = Move()
     initialize_pieces(board)
     while 1:
@@ -665,13 +743,19 @@ def cleanup():
 
 
 def main():
-    """Main function- initializes screen and starts new games."""
+    """Main function- initializes screen and starts new games.
+      
+       Note:
+           Implemented game names are 'Brandubh','Ard Ri','Tablut','Tawlbwrdd','Hnefatafl', and 'Alea Evangelii'
+
+    """
     pygame.init()
     screen = pygame.display.set_mode(WINDOW_SIZE)
     initialize_groups()
+    game_name = 'Hnefatafl'
     play = True
     while play:
-        play = run_game(screen)
+        play = run_game(screen,game_name)
         cleanup()
 
 if __name__ == '__main__':

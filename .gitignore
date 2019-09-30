@@ -1,4 +1,5 @@
 old_models/*
+models_*/*
 training_logs/*
 intermediate_models/*
 __pycache__/
