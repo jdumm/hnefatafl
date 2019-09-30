@@ -350,7 +350,7 @@ class Board(object):
         global MARGIN
         game_name = game_name.lower()
         if game_name=='brandubh':
-            self.grid = ["x..a...x",
+            self.grid = ["x..a..x",
                          "...a...",
                          "...d...",
                          "aadcdaa",
@@ -358,7 +358,7 @@ class Board(object):
                          "...a...",
                          "x..a..x"]
         elif game_name=='ard ri' or game_name=='ardri' or game_name=='ard_ri':
-            self.grid = ["x.aaa..x",
+            self.grid = ["x.aaa.x",
                          "...a...",
                          "a.ddd.a",
                          "aadcdaa",

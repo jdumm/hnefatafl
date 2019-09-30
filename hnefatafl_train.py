@@ -476,7 +476,8 @@ def do_best_move(move,model,sample_frac=1.0):
         for king in tafl.Kings:
             move.select(king)
             tafl.Current.add(king)
-            for pos in [(0,0),(0,10),(10,0),(10,10), (0,1),(1,0),(0,9),(1,10),(10,1),(9,0),(10,9),(9,10)]:
+            # Can we win now?
+            for pos in tafl.SPECIALSQS.difference([((tafl.DIM-1)//2, (tafl.DIM-1)//2)]):
                 if pos in move.vm:
                     if move.is_valid_move(pos, tafl.Current.sprites()[0], True):
                         move.king_escaped(tafl.Kings)
@@ -487,6 +488,21 @@ def do_best_move(move,model,sample_frac=1.0):
                     move.end_turn(tafl.Current.sprites()[0])
                     tafl.Current.empty()
                     return game_state,1.0
+            # Can we land next to winning square?
+            for pos in tafl.SPECIALSQS.difference([((tafl.DIM-1)//2, (tafl.DIM-1)//2)]):
+                for shift in [(1,0), (-1,0), (0,1), (0,-1)]: #RLUD shifts
+                    pos=(pos[0]-shift[0],pos[1]-shift[1])
+                    if pos[0]<0 or pos[0]>=tafl.DIM or pos[1]<0 or pos[1]>=tafl.DIM: continue  # out of bounds
+                    if pos in move.vm:
+                        if move.is_valid_move(pos, tafl.Current.sprites()[0], True):
+                            move.king_escaped(tafl.Kings)
+                        if move.a_turn:
+                            move.remove_pieces(tafl.Defenders, tafl.Attackers, tafl.Kings)
+                        else:
+                            move.remove_pieces(tafl.Attackers, tafl.Defenders, tafl.Kings)
+                        move.end_turn(tafl.Current.sprites()[0])
+                        tafl.Current.empty()
+                        return game_state,1.0
             move.select(king)
             tafl.Current.empty()
 
