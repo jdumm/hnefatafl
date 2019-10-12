@@ -90,7 +90,7 @@ class Move(object):
 
         The function finds the tile on the board where the player wants to move
         their piece and returns True if the tile is in the set of valid moves
-        for the selected piece.
+        for the selected piece.  If True, move is performed.
 
         Args:
             pos (int, int): x and y coordinates in pixels
@@ -121,7 +121,7 @@ class Move(object):
             self.escaped = True
             self.game_over = True
 
-    def remove_pieces(self, g1, g2, Kings):
+    def remove_pieces(self, g1, g2, Kings, king_is_special=True):
         """Determine if any pieces need to be removed from the board.
 
         check_pts is a list of four tuples. Each tuple is a tuple of tile
@@ -146,7 +146,7 @@ class Move(object):
         captured = []
         king = (Kings.sprites()[0].x_tile, Kings.sprites()[0].y_tile)
         for square in check_pts:
-            if square[0] == king:
+            if square[0] == king and king_is_special:
                 if Kings.sprites()[0] in g1:
                     if self.kill_king(king[0], king[1], g2):
                         self.king_killed = True
@@ -158,13 +158,21 @@ class Move(object):
                         for p2 in g2:
                             if (p2.x_tile, p2.y_tile) == (square[1]):
                                 captured.append(p1)
+                                if Kings.sprites()[0] == p1:
+                                    self.king_killed = True
+                                    self.game_over = True
+
                             elif square[1] in SPECIALSQS:
                                 if square[1] != king:
                                     captured.append(p1)
+                                    if Kings.sprites()[0] == p1:
+                                        self.king_killed = True
+                                        self.game_over = True
+
         for a in captured:
             a.kill()
 
-    def kill_king(self, x, y, attackers,test_x=None,test_y=None):
+    def kill_king(self, x, y, attackers, test_x=None, test_y=None):
         """Determine if the king has been killed.
 
         The king is killed if it is surrounded on all four sides by attacking
