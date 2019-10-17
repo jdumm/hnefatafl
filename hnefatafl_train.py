@@ -292,7 +292,6 @@ def run_game(attacker_model=None,defender_model=None,human_attacker=False,human_
     board = tafl.Board(game_name)
     move = tafl.Move()
     tafl.initialize_pieces(board)
-    # TODO: Temp hack for simple2
     if game_name == "simple":
         if random.random()<0.5: tafl.Defenders.sprites()[0].kill()
         else:                   tafl.Defenders.sprites()[1].kill()
@@ -314,15 +313,15 @@ def run_game(attacker_model=None,defender_model=None,human_attacker=False,human_
                     sys.exit()
                 if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                     pass
-        #if(num_moves >= 200):
-        if(num_moves > 8): # TEMP HACK FOR SIMPLE
+        #if(num_moves > 8): # TEMP HACK FOR SIMPLE
+        if(num_moves >= 200):
             print("--- Draw game after {} moves".format(num_moves))
             a_predicted_scores.append(0.0)
             d_predicted_scores.append(0.0)
             return play,a_game_states,a_predicted_scores[1:], d_game_states,d_predicted_scores[1:]
 
         if move.a_turn:
-            if game_name == "simple" and True:  # TODO: Temp hack to skip attacker turn!
+            if game_name == "simple" and False:
                 move.a_turn = False
                 continue  
             #print("Attacker's Turn: Move {}".format(num_moves))
@@ -530,8 +529,7 @@ def do_best_move(move,model,game_state_cache,sample_frac=1.0,screen=None,board=N
     best_move = None
     best_game_state = None
     best_vm = None
-    #for piece in pieces:
-    for piece in tafl.Kings:  # TEMP HACK FOR SIMPLE!!
+    for piece in pieces:
         if random.random() > sample_frac: continue
         if screen and board: time.sleep(1.0)
         move.select(piece) # Move class defines all possible valid moves
@@ -825,8 +823,8 @@ def smooth_corrected_scores_exp(corrected_scores,dynamic=True,decay_constant=5.)
         Exponential strategy.  dynamic mode = True means exp weight scales with game length.
         False means the decay_constant in terms of num game states is used.  
     """
-    if dynamic: decay_constant = float(len(corrected_scores))
-    for i in range(len(corrected_scores)-1):
+    if dynamic: decay_constant = float(len(corrected_scores))/2. # 1/2 game length
+    for i in range(len(corrected_scores)-1)//2:
         corrected_scores[-1*(i+2)] = (corrected_scores[-1*(i+2)] + math.exp(-i/decay_constant)*corrected_scores[-1*(i+1)]) / (1. + math.exp(-i/decay_constant))
 
 @click.command()
@@ -953,9 +951,9 @@ def main(game_name,human_attacker,human_defender,interactive,train_attacker,trai
         if train_attacker and attacker_model is not None and len(a_corrected_scores)>0:
             #print(np.array_repr( a_game_states[-2] ).replace('\n', ''))
             #print(np.array_repr( a_game_states[-1] ).replace('\n', ''))
-            print( """Last 15 Attacker states: {}""".format(' '.join(['{:+0.4f}'.format(entry) for entry in a_corrected_scores[-16:-1]])))
-            #smooth_corrected_scores_exp(a_corrected_scores)
-            print( """               Smoothed: {}""".format(' '.join(['{:+0.4f}'.format(entry) for entry in a_corrected_scores[-15:]])))
+            print( """Last Attacker states: {}""".format(' '.join(['{:+0.4f}'.format(entry) for entry in a_corrected_scores[-16:-1]])))
+            smooth_corrected_scores_exp(a_corrected_scores)
+            print( """            Smoothed: {}""".format(' '.join(['{:+0.4f}'.format(entry) for entry in a_corrected_scores[-15:]])))
             a_game_states,a_corrected_scores = unison_shuffled_copies(np.array(a_game_states),np.array(a_corrected_scores))
             if use_symmetry:
                 a_game_states = expand_game_states_symmetries(a_game_states)
@@ -967,9 +965,9 @@ def main(game_name,human_attacker,human_defender,interactive,train_attacker,trai
         if train_defender and defender_model is not None and len(d_corrected_scores)>0:
             #print(np.array_repr( d_game_states[-2] ).replace('\n', ''))
             #print(np.array_repr( d_game_states[-1] ).replace('\n', ''))
-            print( """Last 15 Defender states: {}""".format(' '.join(['{:+0.4f}'.format(entry) for entry in d_corrected_scores[-16:-1]])))
-            #smooth_corrected_scores_exp(d_corrected_scores)
-            print( """               Smoothed: {}""".format(' '.join(['{:+0.4f}'.format(entry) for entry in d_corrected_scores[-15:]])))
+            print( """Last Defender states: {}""".format(' '.join(['{:+0.4f}'.format(entry) for entry in d_corrected_scores[-16:-1]])))
+            smooth_corrected_scores_exp(d_corrected_scores)
+            print( """            Smoothed: {}""".format(' '.join(['{:+0.4f}'.format(entry) for entry in d_corrected_scores[-15:]])))
             d_game_states,d_corrected_scores = unison_shuffled_copies(np.array(d_game_states),np.array(d_corrected_scores))
             if use_symmetry:
                 d_game_states = expand_game_states_symmetries(d_game_states)
