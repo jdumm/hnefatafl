@@ -99,6 +99,9 @@ class Move(object):
         Returns:
             bool: True if valid move, false o.w.
         """
+        self.undo_row = piece.x_tile
+        self.undo_col = piece.y_tile
+
         if tile_coords:
             row = pos[0]
             col = pos[1]
@@ -169,8 +172,21 @@ class Move(object):
                                         self.king_killed = True
                                         self.game_over = True
 
-        for a in captured:
-            a.kill()
+        RemovedPieces.empty()
+        RemovedAttackers.empty()
+        RemovedDefenders.empty()
+        RemovedKings.empty()
+        for p in captured:
+            #p.kill()
+            if p in Pieces:
+                RemovedPieces.add(p)
+            if p in Attackers:
+                RemovedAttackers.add(p)
+            if p in Defenders:
+                RemovedDefenders.add(p)
+            if p in Kings:
+                RemovedKings.add(p)
+            p.remove(Pieces,Attackers,Defenders,Kings)
 
     def kill_king(self, x, y, attackers, test_x=None, test_y=None):
         """Determine if the king has been killed.
@@ -325,10 +341,37 @@ class Move(object):
         other player can go, the selected piece is deselected, and its color
         returns to normal.
         """
+        #self.undo(piece)
+
         self.a_turn = not self.a_turn
         self.selected = False
         piece.color = piece.base_color
 
+    def undo(self,last_moved_piece):
+        """ Undo the last move, restoring any pieces that were removed.
+        """
+        for piece in RemovedPieces:
+            Pieces.add(piece)
+        for piece in RemovedAttackers:
+            Attackers.add(piece)
+        for piece in RemovedDefenders:
+            Defenders.add(piece)
+        for piece in RemovedKings:
+            Kings.add(piece)
+
+        self.row = self.undo_row
+        self.col = self.undo_col
+        last_moved_piece.pos_cent(self.undo_row,self.undo_col)
+        self.valid_moves(last_moved_piece.special_sqs)
+
+        self.king_killed = False
+        self.escaped     = False
+        self.game_over   = False
+
+        RemovedPieces.empty()
+        RemovedAttackers.empty()
+        RemovedDefenders.empty()
+        RemovedKings.empty()
 
 class Board(object):
 
@@ -365,6 +408,12 @@ class Board(object):
                          "...d...",
                          "...a...",
                          "x..a..x"]
+        elif game_name=='simple':
+            self.grid = ["xd...",
+                         "d....",
+                         "..c..",
+                         ".....",
+                         "....."]
         elif game_name=='ard ri' or game_name=='ardri' or game_name=='ard_ri':
             self.grid = ["x.aaa.x",
                          "...a...",
@@ -437,13 +486,15 @@ class Board(object):
                        'c': (242, 240, 228),
                        '.': (250, 236, 163)}
 
-        if game_name =='tablut': # Special case overrides
+        if game_name == 'tablut': # Special case overrides
             SPECIALSQS = set([(len(self.grid)//2,len(self.grid)//2), (0,3), (0,4), (0,5),
                                                                      (3,0), (4,0), (5,0),
                                                                      (3,8), (4,8), (5,8),
                                                                      (8,3), (8,4), (8,5),
                                                                      (4,1), (4,7), (1,4), (7,4)])
             self.colors['a'] = self.colors['x']
+        if game_name == 'simple': # Special case overrides
+            SPECIALSQS = set([(len(self.grid)//2,len(self.grid)//2), (0,0)])
 
         DIM = len(self.grid)
         GSIZE = WIDTH // (DIM+1)
@@ -568,12 +619,20 @@ def initialize_groups():
     global Defenders
     global Kings
     global Current
+    global RemovedPieces # for Undo
+    global RemovedAttackers
+    global RemovedDefenders
+    global RemovedKings
 
     Pieces = pygame.sprite.Group()
     Attackers = pygame.sprite.Group()
     Defenders = pygame.sprite.Group()
     Kings = pygame.sprite.Group()
     Current = pygame.sprite.Group()
+    RemovedPieces = pygame.sprite.Group()
+    RemovedAttackers = pygame.sprite.Group()
+    RemovedDefenders= pygame.sprite.Group()
+    RemovedKings = pygame.sprite.Group()
 
     Piece.groups = Pieces
     Defender.groups = Pieces, Defenders
@@ -688,6 +747,7 @@ def run_game(screen,game_name='hnefatafl'):
                     return True
                 if event.key == pygame.K_r:
                     move.restart = True
+                    
             if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                 pos = pygame.mouse.get_pos()
                 if move.game_over:
@@ -718,6 +778,7 @@ def run_game(screen,game_name='hnefatafl'):
                             move.remove_pieces(Attackers, Defenders, Kings)
                         move.end_turn(Current.sprites()[0])
                         Current.empty()
+                    
 
         """Text to display on bottom of game."""
         text2 = None
@@ -748,6 +809,10 @@ def cleanup():
     Defenders.empty()
     Attackers.empty()
     Pieces.empty()
+    RemovedPieces.empty()
+    RemovedAttackers.empty()
+    RemovedDefenders.empty()
+    RemovedKings.empty()
 
 
 def main():
@@ -760,7 +825,7 @@ def main():
     pygame.init()
     screen = pygame.display.set_mode(WINDOW_SIZE)
     initialize_groups()
-    game_name = 'Hnefatafl'
+    game_name = 'Brandubh'
     play = True
     while play:
         play = run_game(screen,game_name)
