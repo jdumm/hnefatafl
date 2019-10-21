@@ -12,7 +12,7 @@ The game is played on an 11x11 board, and the initial layout is shown above. The
 
 Every piece can move in the same way- just like a rook in chess. They can move horizontally or vertically as far as they want, but they cannot jump over any other pieces. The king (green) is the only piece that can move *onto* the center and corner tiles, but all of the other pieces can move *through* the center tile.
 
-Players can capture their opponents pieces by sandwiching an opponents piece. The center and corners are considered hostile territory, so they can be used to sandwich/capture an opponent. For instance, if the defending player moves their piece such that they sandwich an attacking piece between their piece and the corner, then the attacking piece is removed from the board.
+Players can capture their opponent's pieces by sandwiching an opponent's piece. The center and corners are considered hostile territory, so they can be used to sandwich/capture an opponent. For instance, if the defending player moves their piece such that they sandwich an attacking piece between their piece and the corner, then the attacking piece is removed from the board.
 
 The king is captured when it is enclosed on all four sides.
 
@@ -41,7 +41,7 @@ The text on the bottom will tell you whose turn it is (red is the attacker, blue
 The game is not quite finished yet. It cannot detect if there is a draw game. Other than that, it is fully functional.
 
 # AI training Using Reinforcement Learning
-Keras Deep Neural Nets are used to predict the score (-1 = very bad to +1 = very good) of any given game board state (current arrangment of pieces) for possible future moves.  These DNNs are initialized with random values and learn through adversarial self play.  When a game is finished, the states leading up to the final outcome are scored more highly/lowly for the team who won/lost.  These DNNs are updated after each game, learning from their mistakes.  These trained AIs can be saved and reloaded.  
+Keras Deep Neural Nets are used to predict the score (-1 = very bad to +1 = very good) of any given game board state (current arrangement of pieces) for possible future moves.  These DNNs are initialized with random values and learn through adversarial self play.  When a game is finished, the states leading up to the final outcome are scored higher/lower for the team who won/lost.  These DNNs are updated after each game, learning from their mistakes.  These trained AIs can be saved and reloaded.  
 
 I followed the basic approach outlined in a [Kaggle notebook on self-learning Tic-Tac-Toe](https://www.kaggle.com/dhanushkishore/a-self-learning-tic-tac-toe-program/notebook), though I alter more just than the last state leading up to a win since hnefatafl takes many more turns to complete.
 
