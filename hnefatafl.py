@@ -825,7 +825,7 @@ def main():
     pygame.init()
     screen = pygame.display.set_mode(WINDOW_SIZE)
     initialize_groups()
-    game_name = 'Brandubh'
+    game_name = 'Hnefatafl' #'Brandubh'
     play = True
     while play:
         play = run_game(screen,game_name)
