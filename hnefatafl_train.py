@@ -66,6 +66,8 @@ Avg game duration is {:0.4f} over the last {} games, {:0.4f} over total of {} ga
         self.a_outcomes.append(a_score)
         self.num_moves.append(num_move)
         self.game_durations.append(game_duration)
+    def num_games_total(self):
+        return len(self.a_outcomes)
 
 def run_game_random(screen=None,game_name='Hnefatafl'):
 
@@ -334,7 +336,7 @@ def run_game(attacker_model=None,defender_model=None,human_attacker=False,human_
                 a_predicted_scores.append(predicted_score)
             else:
                 if human_defender: time.sleep(0.5)
-                game_state,predicted_score = do_best_move(move,attacker_model,game_state_cache,sample_frac=1.00)
+                game_state,predicted_score = do_best_move(move,attacker_model,game_state_cache,sample_frac=0.90)
                 #game_state,predicted_score = do_best_move(move,attacker_model,game_state_cache,sample_frac=1.00,screen=screen,board=board)
                 a_game_states.append(game_state)
                 a_predicted_scores.append(predicted_score)
@@ -350,7 +352,7 @@ def run_game(attacker_model=None,defender_model=None,human_attacker=False,human_
                 d_predicted_scores.append(predicted_score)
             else:
                 if human_attacker: time.sleep(0.5)
-                game_state,predicted_score = do_best_move(move,defender_model,game_state_cache,sample_frac=1.00)
+                game_state,predicted_score = do_best_move(move,defender_model,game_state_cache,sample_frac=0.90)
                 #game_state,predicted_score = do_best_move(move,defender_model,game_state_cache,sample_frac=1.00,screen=screen,board=board)
                 d_game_states.append(game_state)
                 d_predicted_scores.append(predicted_score)
@@ -733,7 +735,7 @@ def initialize_random_nn_model_3d_dense_v2():
     model.add(Dense(1,kernel_initializer='normal'))
 
     learning_rate = 0.001
-    momentum = 0.8
+    momentum = 0.9
 
     sgd = SGD(lr=learning_rate, momentum=momentum, nesterov=False)
     model.compile(loss='mean_squared_error', optimizer=sgd)
@@ -751,9 +753,9 @@ def game_state_to_array():
     for p in tafl.Attackers:
         arr[p.x_tile][p.y_tile] = '1'
     for p in tafl.Defenders:
-        arr[p.x_tile][p.y_tile] = '10'
+        arr[p.x_tile][p.y_tile] = '2'
     for p in tafl.Kings:
-        arr[p.x_tile][p.y_tile] = '100'
+        arr[p.x_tile][p.y_tile] = '3'
 
     return arr
 
@@ -824,7 +826,7 @@ def smooth_corrected_scores_exp(corrected_scores,dynamic=True,decay_constant=5.)
         False means the decay_constant in terms of num game states is used.  
     """
     if dynamic: decay_constant = float(len(corrected_scores))/2. # 1/2 game length
-    for i in range(len(corrected_scores)-1)//2:
+    for i in range(len(corrected_scores)//2-1):
         corrected_scores[-1*(i+2)] = (corrected_scores[-1*(i+2)] + math.exp(-i/decay_constant)*corrected_scores[-1*(i+1)]) / (1. + math.exp(-i/decay_constant))
 
 @click.command()
@@ -839,10 +841,11 @@ def smooth_corrected_scores_exp(corrected_scores,dynamic=True,decay_constant=5.)
 @click.option('-s/-ns',   '--use-symmetry/--no-symmetry',        default=False, help='Set to train using symmetrical board states')
 @click.option('-al',      '--attacker-load',                     default=0,     help='Attacker model file num to load')
 @click.option('-dl',      '--defender-load',                     default=0,     help='Defender model file num to load')
+@click.option('-sl',      '--stats-load',                        default=0,     help='Stats model file num to load')
 @click.option('-v',       '--version',                           default=7,     help='Model version number')
 #@click.option('-r/-nr',   '--resume/--no-resume',                default=False, help='Resume from latest cache for provided game/version.')
 def main(game_name,human_attacker,human_defender,interactive,train_attacker,train_defender,dynamic_train,cache_model_every,use_symmetry,
-         attacker_load,defender_load,version):
+         attacker_load,defender_load,stats_load,version):
     """Main training loop."""
 
     global king_is_special
@@ -907,8 +910,8 @@ def main(game_name,human_attacker,human_defender,interactive,train_attacker,trai
         else:                    defender_model = load_model('{}/defender_model_{}_games.h5'.format(save_dir,defender_load))
 
     stats = None
-    if max(num_train_games_attacker,num_train_games_defender)>0 and (not human_attacker or not human_defender): # Pick up the last cached stats tracker
-        stats = pickle.load( open('{}/StatsTracker_{}_games.pkl'.format(save_dir,max(num_train_games_attacker,num_train_games_defender)), 'rb') )
+    if stats_load>0 and (not human_attacker or not human_defender): # Pick up the last cached stats tracker
+        stats = pickle.load( open('{}/StatsTracker_{}_games.pkl'.format(save_dir,stats_load), 'rb') )
     if not stats:
         stats = StatsTracker(200)
 
@@ -939,7 +942,6 @@ def main(game_name,human_attacker,human_defender,interactive,train_attacker,trai
         #else: # PvP stats not tracked
 
         # Make a decision about whether or not to keep training Defender
-        # TODO: Make symmetric
         if dynamic_train and (stats.a_win_rate_window() + stats.draw_rate_window()/2.) < 0.40:
             train_defender = False # Too smart, pause training
         else: train_defender = train_defender_orig
@@ -976,11 +978,11 @@ def main(game_name,human_attacker,human_defender,interactive,train_attacker,trai
             #defender_model.fit(d_game_states.reshape(-1,11,11,1),d_corrected_scores,epochs=1,batch_size=1,verbose=0)
             defender_model.fit(d_game_states.reshape(-1,tafl.DIM*tafl.DIM*3),d_corrected_scores,epochs=1,batch_size=1,verbose=0)
 
-        if(max(num_train_games_attacker,num_train_games_defender)%cache_model_every==0):  # Save every cache_model_every games
-            #print('--- num games played: {}'.format(max(num_train_games_attacker,num_train_games_defender)))
-            if train_attacker: attacker_model.save('{}/attacker_model_{}_games.h5'.format(save_dir,num_train_games_attacker))
-            if train_defender: defender_model.save('{}/defender_model_{}_games.h5'.format(save_dir,num_train_games_defender))
-            if train_attacker or train_defender: pickle.dump(stats, open( '{}/StatsTracker_{}_games.pkl'.format(save_dir,max(num_train_games_attacker,num_train_games_defender)), 'wb' ))
+        if(stats.num_games_total()%cache_model_every==0):  # Save every cache_model_every games
+            #print('--- num games played: {}'.format(stats.num_games_total()))
+            if num_train_games_attacker>0: attacker_model.save('{}/attacker_model_{}_games.h5'.format(save_dir,num_train_games_attacker))
+            if num_train_games_defender>0: defender_model.save('{}/defender_model_{}_games.h5'.format(save_dir,num_train_games_defender))
+            if train_attacker or train_defender: pickle.dump(stats, open( '{}/StatsTracker_{}_games.pkl'.format(save_dir,stats.num_games_total()), 'wb' ))
 
         if interactive:
             time.sleep(2)
