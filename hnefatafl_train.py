@@ -69,50 +69,6 @@ Avg game duration is {:0.4f} over the last {} games, {:0.4f} over total of {} ga
     def num_games_total(self):
         return len(self.a_outcomes)
 
-def run_game_random(screen=None,game_name='Hnefatafl'):
-
-    """Start a new game with random (legal) moves.
-       TODO: Remove?  I think it's no longer needed.
-    """
-    board = tafl.Board(game_name)
-
-    move = tafl.Move()
-    tafl.initialize_pieces(board)
-    num_moves = 0
-    while 1:
-        for event in pygame.event.get():
-            if event.type == QUIT:
-                sys.exit()
-            if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
-               pass
-
-        do_random_move(move)
-        num_moves += 1
-        if(num_moves >= 1000):
-            print("--- Draw game after {} moves".format(num_moves))
-            return False
-
-        """Text to display on bottom of game."""
-        text  = None
-        text2 = None
-        if move.escaped:
-            text = "--- King escaped! Defenders win!"
-            print(text)
-            text2 = "Play again? y/n"
-            return False
-        if move.king_killed:
-            text = "--- King killed! Attackers win!"
-            print(text)
-            text2 = "Play again? y/n"
-            return False
-        if move.restart:
-            text = "Restart game? y/n"
-            print(text)
-            return False
-        if screen is not None:
-            tafl.update_image(screen, board, move, text)
-            pygame.display.flip()
-        #time.sleep(1)
 
 def do_random_move(move):
     """ Purely random but legal moves
