@@ -17,15 +17,9 @@ Players can capture their opponent's pieces by sandwiching an opponent's piece. 
 The king is captured when it is enclosed on all four sides.
 
 # Running the Game
-The only dependencies are Pygame and Click. To install both on Unix: 
+Dependencies can be installed by running:
 ```
-sudo apt-get install python-pygame
-pip install click
-```
-On Mac:
-```
-python3 -m pip install -U pygame --user
-pip install click
+pip install -r requirements.txt 
 ```
 
 To run the PvP game, simply run:
@@ -36,9 +30,6 @@ python hnefatafl.py
 While in the game, pressing ```r``` will ask the user if they want to restart the game, which they can confirm with ```y``` or ```n```. Also, when one player has won the game, they can start a new game by pressing ```y``` or exit the game by pressing ```n```.
 
 The text on the bottom will tell you whose turn it is (red is the attacker, blue is the defender, and the king is green).
-
-# Limitations
-The game is not quite finished yet. It cannot detect if there is a draw game. Other than that, it is fully functional.
 
 # AI training Using Reinforcement Learning
 Keras Deep Neural Nets are used to predict the score (-1 = very bad to +1 = very good) of any given game board state (current arrangement of pieces) for possible future moves.  These DNNs are initialized with random values and learn through adversarial self play.  When a game is finished, the states leading up to the final outcome are scored higher/lower for the team who won/lost.  These DNNs are updated after each game, learning from their mistakes.  These trained AIs can be saved and reloaded.  

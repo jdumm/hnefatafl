@@ -1,2 +1,5 @@
+numpy
 pygame
 click
+tensorflow
+keras

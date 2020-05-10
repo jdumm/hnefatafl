@@ -11,7 +11,7 @@ Date: 4/4/2019
 import os 
 import sys
 from timeit import default_timer as timer
-import pyximport; pyximport.install()
+#import pyximport; pyximport.install()
 import pygame
 from pygame.locals import *
 import click
