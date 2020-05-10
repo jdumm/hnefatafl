@@ -75,7 +75,7 @@ def run_game_random(screen=None,game_name='Hnefatafl'):
        TODO: Remove?  I think it's no longer needed.
     """
     board = tafl.Board(game_name)
-    
+
     move = tafl.Move()
     tafl.initialize_pieces(board)
     num_moves = 0
@@ -85,7 +85,7 @@ def run_game_random(screen=None,game_name='Hnefatafl'):
                 sys.exit()
             if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                pass
-        
+
         do_random_move(move)
         num_moves += 1
         if(num_moves >= 1000):
@@ -116,7 +116,7 @@ def run_game_random(screen=None,game_name='Hnefatafl'):
 
 def do_random_move(move):
     """ Purely random but legal moves
-    """ 
+    """
     if move.a_turn:
         pieces = tafl.Attackers
     else:
@@ -722,16 +722,10 @@ def initialize_random_nn_model_3d_dense_v2():
     """
     print("Initializing randomized NN model")
     model = Sequential()
-    #model.add(Dense(2*tafl.DIM*tafl.DIM*3, input_dim=tafl.DIM*tafl.DIM*3,kernel_initializer='normal', activation='relu'))
-    #model.add(Dropout(0.01))
     model.add(Dense(tafl.DIM*tafl.DIM*3, input_dim=tafl.DIM*tafl.DIM*3, kernel_initializer='normal',activation='relu'))
     model.add(Dropout(0.1))
-    # Adding more test layers
-
     model.add(Dense(tafl.DIM*3, kernel_initializer='normal',activation='relu'))
     model.add(Dropout(0.1))
-    #model.add(Dense(tafl.DIM//2, kernel_initializer='normal',activation='relu'))
-
     model.add(Dense(1,kernel_initializer='normal'))
 
     learning_rate = 0.001
