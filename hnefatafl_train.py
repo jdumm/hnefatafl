@@ -692,6 +692,30 @@ def initialize_random_nn_model_3d_dense_v2():
     model.summary()
     return model
 
+def initialize_random_nn_model_3d_dense_v3():
+    """ Initialize Keras Deep Neural Networks models and print summary.
+        Architecture for the 3d game states, boxy layout.
+    """
+    print("Initializing randomized NN model")
+    model = Sequential()
+    model.add(Dense(tafl.DIM*tafl.DIM*3, input_dim=tafl.DIM*tafl.DIM*3,kernel_initializer='normal', activation='relu'))
+    model.add(Dropout(0.05))
+    model.add(Dense(tafl.DIM*tafl.DIM*3, kernel_initializer='normal',activation='relu'))
+    model.add(Dropout(0.05))
+    model.add(Dense(tafl.DIM*tafl.DIM*3, kernel_initializer='normal',activation='relu'))
+    model.add(Dropout(0.05))
+    model.add(Dense(tafl.DIM*tafl.DIM*3, kernel_initializer='normal',activation='relu'))
+
+    model.add(Dense(1,kernel_initializer='normal'))
+
+    learning_rate = 0.010
+    momentum = 0.8
+
+    sgd = SGD(lr=learning_rate, momentum=momentum, nesterov=False)
+    model.compile(loss='mean_squared_error', optimizer=sgd)
+    model.summary()
+    return model
+
 def game_state_to_array():
     """ 2D Numpy array representation of game state for ML model.
     """
@@ -846,7 +870,7 @@ def main(game_name,human_attacker,human_defender,interactive,train_attacker,trai
         #attacker_load   = 0
         attacker_load   = num_train_games_attacker
         #if attacker_load==0: attacker_model = initialize_random_nn_model_3d()
-        if attacker_load==0: attacker_model = initialize_random_nn_model_3d_dense_v2()
+        if attacker_load==0: attacker_model = initialize_random_nn_model_3d_dense_v3()
         else:                attacker_model = load_model('{}/attacker_model_{}_games.h5'.format(save_dir,attacker_load))
 
     defender_model = None
@@ -856,7 +880,7 @@ def main(game_name,human_attacker,human_defender,interactive,train_attacker,trai
         #defender_load   = num_train_games_defender
         if defender_load == -1:  defender_model = None  # Defaults to mostly random + some extra King movements
         #elif defender_load == 0: defender_model = initialize_random_nn_model_3d()
-        elif defender_load == 0: defender_model = initialize_random_nn_model_3d_dense_v2()
+        elif defender_load == 0: defender_model = initialize_random_nn_model_3d_dense_v3()
         else:                    defender_model = load_model('{}/defender_model_{}_games.h5'.format(save_dir,defender_load))
 
     stats = None
