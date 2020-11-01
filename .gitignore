@@ -5,3 +5,4 @@ intermediate_models/*
 __pycache__/
 *.py[cod]
 example_notebooks/*
+.idea

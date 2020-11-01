@@ -933,7 +933,7 @@ def main(game_name,human_attacker,human_defender,interactive,train_attacker,trai
             a_game_states,a_corrected_scores = unison_shuffled_copies(np.array(a_game_states),np.array(a_corrected_scores))
             if use_symmetry:
                 a_game_states = expand_game_states_symmetries(a_game_states)
-                a_corrected_scores = np.repeat(a_corrected_scores,8,axis=0)
+                a_corrected_scores = np.tile(a_corrected_scores,(8,1))
             #attacker_model.fit(a_game_states.reshape(-1,11*11),a_corrected_scores,epochs=1,batch_size=1,verbose=0)
             #attacker_model.fit(a_game_states.reshape(-1,11,11,1),a_corrected_scores,epochs=1,batch_size=1,verbose=0)
             attacker_model.fit(a_game_states.reshape(-1,tafl.DIM*tafl.DIM*3),a_corrected_scores,epochs=1,batch_size=1,verbose=0)
@@ -947,7 +947,7 @@ def main(game_name,human_attacker,human_defender,interactive,train_attacker,trai
             d_game_states,d_corrected_scores = unison_shuffled_copies(np.array(d_game_states),np.array(d_corrected_scores))
             if use_symmetry:
                 d_game_states = expand_game_states_symmetries(d_game_states)
-                d_corrected_scores = np.repeat(d_corrected_scores,8)
+                d_corrected_scores = np.tile(d_corrected_scores,(8,1))
             #defender_model.fit(d_game_states.reshape(-1,11*11),d_corrected_scores,epochs=1,batch_size=1,verbose=0)
             #defender_model.fit(d_game_states.reshape(-1,11,11,1),d_corrected_scores,epochs=1,batch_size=1,verbose=0)
             defender_model.fit(d_game_states.reshape(-1,tafl.DIM*tafl.DIM*3),d_corrected_scores,epochs=1,batch_size=1,verbose=0)
