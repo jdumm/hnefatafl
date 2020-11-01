@@ -111,7 +111,7 @@ def do_dummy_1_defender_move(move):
             move.select(king)
             tafl.Current.add(king)
             kx,ky = king.x_tile,king.y_tile
-            for pos in [(0,0),(0,10),(10,0),(10,10), (0,1),(1,0),(0,9),(1,10),(10,1),(9,0),(10,9),(9,10)]:
+            for pos in [(0,0),(0,tafl.DIM-1),(tafl.DIM-1,0),(tafl.DIM-1,tafl.DIM-1)]:
                 if pos in move.vm:
                     if move.is_valid_move(pos, tafl.Current.sprites()[0], True):
                         move.king_escaped(tafl.Kings)
@@ -123,7 +123,7 @@ def do_dummy_1_defender_move(move):
                     tafl.Current.empty()
                     return
             # If King can move to a higher position, do it some of the time.
-            if len(move.vm)>0 and random.random()<0.02:
+            if len(move.vm)>0 and random.random()<0.4:
                 pos = max(move.vm,key=lambda pos:max(pos[0],pos[1])) # Max positional move of King
                 if move.is_valid_move(pos, tafl.Current.sprites()[0], True):
                     move.king_escaped(tafl.Kings)
@@ -177,13 +177,14 @@ def do_mostly_random_but_strike_to_kill_move(move):
     """ 
 
     if move.a_turn:
-        pieces = tafl.Attackers
+        print("Attacker should not call this defender logic!")
+        return
     else:
         # If King can win, do it.
         for king in tafl.Kings:
             move.select(king)
             tafl.Current.add(king)
-            for pos in [(0,0),(0,10),(10,0),(10,10), (0,1),(1,0),(0,9),(1,10),(10,1),(9,0),(10,9),(9,10)]:
+            for pos in [(0,0),(0,tafl.DIM-1),(tafl.DIM,0),(tafl.DIM,tafl.DIM)]:
                 if pos in move.vm:
                     if move.is_valid_move(pos, tafl.Current.sprites()[0], True):
                         move.king_escaped(tafl.Kings)
@@ -194,22 +195,21 @@ def do_mostly_random_but_strike_to_kill_move(move):
                     move.end_turn(tafl.Current.sprites()[0])
                     tafl.Current.empty()
                     return 
-            if random.random()<0.10: # Push King out from center if possible sometimes
+            if random.random()<0.750: # Push King out from center if possible sometimes
                 if len(move.vm)==0: break 
-                else: 
+                else:
+                    print(f"Valid moves for the King: {move.vm}")
                     for m in move.vm:
-                        if abs(5-m[0])>3 or abs(5-m[1])>3:
+                        if abs(tafl.DIM//2-m[0])>tafl.DIM//4 or abs(tafl.DIM//2-m[1])>tafl.DIM//4:
+                            print(f"Doing move to: {m}")
                             if move.is_valid_move(pos, tafl.Current.sprites()[0], True):
                                 move.king_escaped(tafl.Kings)
-                            if move.a_turn:
-                                move.remove_pieces(tafl.Defenders, tafl.Attackers, tafl.Kings)
-                            else:
-                                move.remove_pieces(tafl.Attackers, tafl.Defenders, tafl.Kings)
+                            move.remove_pieces(tafl.Attackers, tafl.Defenders, tafl.Kings)
                         move.end_turn(tafl.Current.sprites()[0])
                         tafl.Current.empty()
-                        return 
+                        return
 
-            move.select(king)
+            move.select(king)  # Deselect
             tafl.Current.empty()
         pieces = tafl.Defenders
 
@@ -234,6 +234,7 @@ def do_mostly_random_but_strike_to_kill_move(move):
                 move.end_turn(tafl.Current.sprites()[0])
                 tafl.Current.empty()
             break
+    return
 
 
 def run_game(attacker_model=None,defender_model=None,human_attacker=False,human_defender=False,screen=None,game_name='Hnefatafl'):
@@ -286,10 +287,9 @@ def run_game(attacker_model=None,defender_model=None,human_attacker=False,human_
             if human_attacker:
                 play = do_human_turn(screen, board, move)
             elif attacker_model is None:
-                game_state = do_random_move(move)
-                predicted_score = (random.random()-0.5) * 2
-                a_game_states.append(game_state)
-                a_predicted_scores.append(predicted_score)
+                do_random_move(move)
+                a_game_states.append(game_state_to_3d_array())
+                a_predicted_scores.append((random.random()-0.5) * 2)
             else:
                 if human_defender: time.sleep(0.5)
                 game_state,predicted_score = do_best_move(move,attacker_model,game_state_cache,sample_frac=0.90)
@@ -439,11 +439,9 @@ def do_best_move(move,model,game_state_cache,sample_frac=1.0,screen=None,board=N
 
     if move.a_turn:
         pieces = tafl.Attackers
-        dim3 = A_DIM
         king = (tafl.Kings.sprites()[0].x_tile, tafl.Kings.sprites()[0].y_tile)
     else:
         pieces = tafl.Defenders
-        dim3 = D_DIM
         # If King can win, do it.
         for king in tafl.Kings:
             move.select(king)
@@ -554,42 +552,50 @@ def do_best_move(move,model,game_state_cache,sample_frac=1.0,screen=None,board=N
         tafl.Current.empty()
 
     if best_piece is None or best_move is None:
+        # This can happen if Defender removes all Attacker pieces
         print("NO BEST MOVE! No moves at all or a Draw?")
-        return game_state,0.0
+        return game_state,-1.0
 
-    #print(" ",best_score)
-    move.select(best_piece)
-    tafl.Current.add(best_piece)
+    egreed = 0.750  # "epsilon-greediness" or push to explore
+    if move.a_turn or egreed < random.random() or best_score + 1 > random.random()*2:  # If the best move is bad, try random
+        #print(" ",best_score)
+        move.select(best_piece)
+        tafl.Current.add(best_piece)
 
-    if best_vm != move.vm:
-        print('best vm: ', best_vm)
-        print('move vm: ', move.vm)
+        if best_vm != move.vm:
+            print('best vm: ', best_vm)
+            print('move vm: ', move.vm)
 
-    if move.is_valid_move(best_move,tafl.Current.sprites()[0], True):
-        if tafl.Current.sprites()[0] in tafl.Kings:
-            move.king_escaped(tafl.Kings)
-        if move.a_turn:
-            move.remove_pieces(tafl.Defenders, tafl.Attackers, tafl.Kings, king_is_special)
+        if move.is_valid_move(best_move,tafl.Current.sprites()[0], True):
+            if tafl.Current.sprites()[0] in tafl.Kings:
+                move.king_escaped(tafl.Kings)
+            if move.a_turn:
+                move.remove_pieces(tafl.Defenders, tafl.Attackers, tafl.Kings, king_is_special)
+            else:
+                move.remove_pieces(tafl.Attackers, tafl.Defenders, tafl.Kings, king_is_special)
+
+            game_state = game_state_to_3d_array()
+
+            move.end_turn(tafl.Current.sprites()[0])
+            tafl.Current.empty()
+
+            #print(game_state,best_score)
+            return game_state,best_score
         else:
-            move.remove_pieces(tafl.Attackers, tafl.Defenders, tafl.Kings, king_is_special)
-
-        game_state = game_state_to_3d_array()
-
-        move.end_turn(tafl.Current.sprites()[0])
-        tafl.Current.empty()
-
-        #print(game_state,best_score)
-        return game_state,best_score
+            print("ERROR: Best move logic failed... Fix! Debugging info follows:")
+            print("BEST MOVE",best_move)
+            print("Current",tafl.Current.sprites()[0],(best_piece.x_tile,best_piece.y_tile), move.row, move.col)
+            print("Valid moves", move.vm)
+            print("reValid moves", move.valid_moves(best_piece.special_sqs,debug=True))
+            #do_human_turn(screen, board, move)
+            time.sleep(30)
+            sys.exit(1)
     else:
-        print("ERROR: Best move logic failed... Fix! Debugging info follows:")
-        print("BEST MOVE",best_move)
-        print("Current",tafl.Current.sprites()[0],(best_piece.x_tile,best_piece.y_tile), move.row, move.col)
-        print("Valid moves", move.vm)
-        print("reValid moves", move.valid_moves(best_piece.special_sqs,debug=True))
-        #do_human_turn(screen, board, move)
-        time.sleep(30)
-        sys.exit(1)
-
+        print(f"Best score {best_score} wasn't so good.  Trying a random move.")
+        time.sleep(0.5)
+        do_dummy_1_defender_move(move)
+        time.sleep(0.5)
+        return game_state_to_3d_array(), best_score
 
 def initialize_random_nn_model():
     """ Initialize Keras Deep Neural Networks models and print summary.
