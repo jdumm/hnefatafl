@@ -14,13 +14,12 @@ from pygame.locals import *
 
 WINDOW_SIZE = WIDTH, HEIGHT = 640, 700
 MARGIN_COLOR = 128, 102, 69
-#GSIZE = WIDTH // 12
-#MARGIN = GSIZE // 12
-#SPECIALSQS = set([(5, 5), (0, 0), (0, 10), (10, 10), (10, 0)])
+# GSIZE = WIDTH // 12
+# MARGIN = GSIZE // 12
+# SPECIALSQS = set([(5, 5), (0, 0), (0, 10), (10, 10), (10, 0)])
 
 
 class Move(object):
-
     """The Move class contains all information about the current move state."""
 
     def __init__(self):
@@ -118,9 +117,9 @@ class Move(object):
             return False
 
     def king_escaped(self, Kings):
-        """Check if king has moved onto a non-central special square."""
+        """Check if king has moved onto a non-central special square or all Attackers removed"""
         king = (Kings.sprites()[0].x_tile, Kings.sprites()[0].y_tile)
-        if king in SPECIALSQS.difference([((DIM-1)//2, (DIM-1)//2)]):
+        if king in SPECIALSQS.difference([((DIM - 1) // 2, (DIM - 1) // 2)]) or Attackers.len() == 0:
             self.escaped = True
             self.game_over = True
 
@@ -142,10 +141,10 @@ class Move(object):
             g2 (Group(sprites)): the current player's pieces
             Kings (Group(sprites)): the group containing the king
         """
-        check_pts = set([((self.row, self.col + 1), (self.row, self.col + 2)),
+        check_pts = {[((self.row, self.col + 1), (self.row, self.col + 2)),
                          ((self.row + 1, self.col), (self.row + 2, self.col)),
                          ((self.row, self.col - 1), (self.row, self.col - 2)),
-                         ((self.row - 1, self.col), (self.row - 2, self.col))])
+                         ((self.row - 1, self.col), (self.row - 2, self.col))]}
         captured = []
         king = (Kings.sprites()[0].x_tile, Kings.sprites()[0].y_tile)
         for square in check_pts:
@@ -177,7 +176,7 @@ class Move(object):
         RemovedDefenders.empty()
         RemovedKings.empty()
         for p in captured:
-            #p.kill()
+            # p.kill()
             if p in Pieces:
                 RemovedPieces.add(p)
             if p in Attackers:
@@ -186,7 +185,7 @@ class Move(object):
                 RemovedDefenders.add(p)
             if p in Kings:
                 RemovedKings.add(p)
-            p.remove(Pieces,Attackers,Defenders,Kings)
+            p.remove(Pieces, Attackers, Defenders, Kings)
 
     def kill_king(self, x, y, attackers, test_x=None, test_y=None):
         """Determine if the king has been killed.
@@ -201,7 +200,7 @@ class Move(object):
         Returns:
             True if king has been killed, False o.w.
         """
-        kill_pts = set([(x, y + 1), (x + 1, y), (x, y - 1), (x - 1, y)])
+        kill_pts = {(x, y + 1), (x + 1, y), (x, y - 1), (x - 1, y)}
         kill_pts.difference_update(SPECIALSQS)
         attack_pts = set()
         for pt in kill_pts:
@@ -254,7 +253,7 @@ class Move(object):
         temp_row = self.row + 1
         clear = True
         while clear:
-            if temp_row > DIM-1:
+            if temp_row > DIM - 1:
                 return vm
             for p in Pieces:
                 ppos = self.ppos_cent(temp_row, self.col)
@@ -302,7 +301,7 @@ class Move(object):
         temp_col = self.col + 1
         clear = True
         while clear:
-            if temp_col > DIM-1:
+            if temp_col > DIM - 1:
                 return vm
             for p in Pieces:
                 ppos = self.ppos_cent(self.row, temp_col)
@@ -320,7 +319,7 @@ class Move(object):
         Returns:
             (int): the top or left pixel location of the tile.
         """
-        return x*(GSIZE + (GSIZE // (DIM+1))) + (GSIZE // (DIM+1))
+        return x * (GSIZE + (GSIZE // (DIM + 1))) + (GSIZE // (DIM + 1))
 
     def ppos_cent(self, x, y):
         """Find the center pixel position of a given tile.
@@ -341,13 +340,13 @@ class Move(object):
         other player can go, the selected piece is deselected, and its color
         returns to normal.
         """
-        #self.undo(piece)
+        # self.undo(piece)
 
         self.a_turn = not self.a_turn
         self.selected = False
         piece.color = piece.base_color
 
-    def undo(self,last_moved_piece):
+    def undo(self, last_moved_piece):
         """ Undo the last move, restoring any pieces that were removed.
         """
         for piece in RemovedPieces:
@@ -361,12 +360,12 @@ class Move(object):
 
         self.row = self.undo_row
         self.col = self.undo_col
-        last_moved_piece.pos_cent(self.undo_row,self.undo_col)
+        last_moved_piece.pos_cent(self.undo_row, self.undo_col)
         self.valid_moves(last_moved_piece.special_sqs)
 
         self.king_killed = False
-        self.escaped     = False
-        self.game_over   = False
+        self.escaped = False
+        self.game_over = False
 
         RemovedPieces.empty()
         RemovedAttackers.empty()
@@ -374,7 +373,6 @@ class Move(object):
         RemovedKings.empty()
 
 class Board(object):
-
     """The Board class contains information about the physical board.
 
     Whereas the move class contains information about the state of the pieces,
@@ -400,7 +398,7 @@ class Board(object):
         global GSIZE
         global MARGIN
         game_name = game_name.lower()
-        if game_name=='brandubh':
+        if game_name == 'brandubh':
             self.grid = ["x..a..x",
                          "...a...",
                          "...d...",
@@ -408,13 +406,13 @@ class Board(object):
                          "...d...",
                          "...a...",
                          "x..a..x"]
-        elif game_name=='simple':
+        elif game_name == 'simple':
             self.grid = ["xd...",
                          "d....",
                          "..c..",
                          ".....",
                          "....."]
-        elif game_name=='ard ri' or game_name=='ardri' or game_name=='ard_ri':
+        elif game_name == 'ard ri' or game_name == 'ardri' or game_name == 'ard_ri':
             self.grid = ["x.aaa.x",
                          "...a...",
                          "a.ddd.a",
@@ -422,7 +420,7 @@ class Board(object):
                          "a.ddd.a",
                          "...a...",
                          "x.aaa.x"]
-        elif game_name=='tablut':
+        elif game_name == 'tablut':
             self.grid = ["...aaa...",
                          "....a....",
                          "....d....",
@@ -432,7 +430,7 @@ class Board(object):
                          "....d....",
                          "....a....",
                          "...aaa..."]
-        elif game_name=='tawlbwrdd':
+        elif game_name == 'tawlbwrdd':
             self.grid = ["x...aaa...x",
                          "....a.a....",
                          ".....a.....",
@@ -444,7 +442,7 @@ class Board(object):
                          ".....a.....",
                          "....a.a....",
                          "x...aaa...x"]
-        elif game_name=='alea evangelii' or game_name=='aleaevangelii' or game_name=='alea_evangelii':
+        elif game_name == 'alea evangelii' or game_name == 'aleaevangelii' or game_name == 'alea_evangelii':
             self.grid = ["x.a..a.......a..a.x",
                          "...................",
                          "a....a.......a....a",
@@ -465,7 +463,8 @@ class Board(object):
                          "...................",
                          "x.a..a.......a..a.x"]
         else:
-            if game_name!='hnefatafl': print("WARN: Game name {} not recognized.  Defaulting to Hnefatafl!".format(game_name))
+            if game_name != 'hnefatafl': print(
+                "WARN: Game name {} not recognized.  Defaulting to Hnefatafl!".format(game_name))
             self.grid = ["x..aaaaa..x",
                          ".....a.....",
                          "...........",
@@ -478,7 +477,8 @@ class Board(object):
                          ".....a.....",
                          "x..aaaaa..x"]
 
-        SPECIALSQS = set([(len(self.grid)//2,len(self.grid)//2), (0,0), (0,len(self.grid)-1), (len(self.grid)-1,len(self.grid)-1), (len(self.grid)-1,0)])
+        SPECIALSQS = set([(len(self.grid) // 2, len(self.grid) // 2), (0, 0), (0, len(self.grid) - 1),
+                          (len(self.grid) - 1, len(self.grid) - 1), (len(self.grid) - 1, 0)])
 
         self.colors = {'x': (25, 25, 25),
                        'a': (186, 169, 85),
@@ -486,24 +486,23 @@ class Board(object):
                        'c': (242, 240, 228),
                        '.': (250, 236, 163)}
 
-        if game_name == 'tablut': # Special case overrides
-            SPECIALSQS = set([(len(self.grid)//2,len(self.grid)//2), (0,3), (0,4), (0,5),
-                                                                     (3,0), (4,0), (5,0),
-                                                                     (3,8), (4,8), (5,8),
-                                                                     (8,3), (8,4), (8,5),
-                                                                     (4,1), (4,7), (1,4), (7,4)])
+        if game_name == 'tablut':  # Special case overrides
+            SPECIALSQS = set([(len(self.grid) // 2, len(self.grid) // 2), (0, 3), (0, 4), (0, 5),
+                              (3, 0), (4, 0), (5, 0),
+                              (3, 8), (4, 8), (5, 8),
+                              (8, 3), (8, 4), (8, 5),
+                              (4, 1), (4, 7), (1, 4), (7, 4)])
             self.colors['a'] = self.colors['x']
-        if game_name == 'simple': # Special case overrides
-            SPECIALSQS = set([(len(self.grid)//2,len(self.grid)//2), (0,0)])
+        if game_name == 'simple':  # Special case overrides
+            SPECIALSQS = set([(len(self.grid) // 2, len(self.grid) // 2), (0, 0)])
 
         DIM = len(self.grid)
-        GSIZE = WIDTH // (DIM+1)
-        MARGIN = GSIZE // (DIM+1)
-        #self.dim = len(self.grid)
+        GSIZE = WIDTH // (DIM + 1)
+        MARGIN = GSIZE // (DIM + 1)
+        # self.dim = len(self.grid)
 
 
 class Piece(pygame.sprite.Sprite):
-
     """Class for all playing pieces.
 
     Pieces are pygame sprite objects. It makes grouping, determining
@@ -521,6 +520,7 @@ class Piece(pygame.sprite.Sprite):
             y (int): the column that the piece will be placed.
         """
         pygame.sprite.Sprite.__init__(self, self.groups)
+        self.base_color = None
         self.special_sqs = False
         self.pos_cent(x, y)
 
@@ -533,7 +533,7 @@ class Piece(pygame.sprite.Sprite):
         Returns:
             (int): the top or left pixel location of the tile.
         """
-        return x*(GSIZE + (GSIZE // (DIM+1))) + (GSIZE // (DIM+1))
+        return x * (GSIZE + (GSIZE // (DIM + 1))) + (GSIZE // (DIM + 1))
 
     def pos_cent(self, x, y):
         """Find the center pixel position of a given tile.
@@ -552,19 +552,18 @@ class Piece(pygame.sprite.Sprite):
         self.y_tile = y
         self.x_px = self.pos(x) + (GSIZE // 2)
         self.y_px = self.pos(y) + (GSIZE // 2)
-        self.rect = pygame.Rect([self.x_px - GSIZE//2,
-                                 self.y_px - GSIZE//2,
+        self.rect = pygame.Rect([self.x_px - GSIZE // 2,
+                                 self.y_px - GSIZE // 2,
                                  GSIZE,
                                  GSIZE])
 
     def draw(self, screen):
         """Draw the piece on the board in the correct location."""
         pygame.draw.circle(screen, self.color, [self.x_px, self.y_px],
-                           GSIZE//2)
+                           GSIZE // 2)
 
 
 class Attacker(Piece):
-
     """Class for all attacking pieces; inherits from Piece."""
 
     def __init__(self, x, y):
@@ -576,7 +575,6 @@ class Attacker(Piece):
 
 
 class Defender(Piece):
-
     """Class for all defending pieces; inherits from Piece."""
 
     def __init__(self, x, y):
@@ -588,7 +586,6 @@ class Defender(Piece):
 
 
 class King(Defender):
-
     """Class for king; inherits from Defender."""
 
     def __init__(self, x, y):
@@ -619,7 +616,7 @@ def initialize_groups():
     global Defenders
     global Kings
     global Current
-    global RemovedPieces # for Undo
+    global RemovedPieces  # for Undo
     global RemovedAttackers
     global RemovedDefenders
     global RemovedKings
@@ -631,7 +628,7 @@ def initialize_groups():
     Current = pygame.sprite.Group()
     RemovedPieces = pygame.sprite.Group()
     RemovedAttackers = pygame.sprite.Group()
-    RemovedDefenders= pygame.sprite.Group()
+    RemovedDefenders = pygame.sprite.Group()
     RemovedKings = pygame.sprite.Group()
 
     Piece.groups = Pieces
@@ -676,8 +673,8 @@ def update_image(screen, board, move, text, text2):
     screen.fill(MARGIN_COLOR)
     for y in range(DIM):
         for x in range(DIM):
-            xywh = [x*(GSIZE + MARGIN) + MARGIN,
-                    y*(GSIZE + MARGIN) + MARGIN,
+            xywh = [x * (GSIZE + MARGIN) + MARGIN,
+                    y * (GSIZE + MARGIN) + MARGIN,
                     GSIZE,
                     GSIZE]
             pygame.draw.rect(screen, board.colors[board.grid[x][y]], xywh)
@@ -706,7 +703,7 @@ def update_image(screen, board, move, text, text2):
     pygame.display.flip()
 
 
-def run_game(screen,game_name='hnefatafl'):
+def run_game(screen, game_name='hnefatafl'):
     """Start and run a new game of game_name ('hnefatafl' by default).
 
     The game, groups, board, move info, screen, and pieces are initialized
@@ -747,7 +744,7 @@ def run_game(screen,game_name='hnefatafl'):
                     return True
                 if event.key == pygame.K_r:
                     move.restart = True
-                    
+
             if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                 pos = pygame.mouse.get_pos()
                 if move.game_over:
@@ -778,7 +775,6 @@ def run_game(screen,game_name='hnefatafl'):
                             move.remove_pieces(Attackers, Defenders, Kings)
                         move.end_turn(Current.sprites()[0])
                         Current.empty()
-                    
 
         """Text to display on bottom of game."""
         text2 = None
@@ -825,10 +821,10 @@ def main():
     pygame.init()
     screen = pygame.display.set_mode(WINDOW_SIZE)
     initialize_groups()
-    game_name = 'Hnefatafl' #'Brandubh'
+    game_name = 'Hnefatafl'  # 'Brandubh'
     play = True
     while play:
-        play = run_game(screen,game_name)
+        play = run_game(screen, game_name)
         cleanup()
 
 if __name__ == '__main__':
