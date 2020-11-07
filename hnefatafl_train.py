@@ -8,10 +8,10 @@ Date: 4/4/2019
 
 """
 
-import os 
+import os
 import sys
 from timeit import default_timer as timer
-#import pyximport; pyximport.install()
+# import pyximport; pyximport.install()
 import pygame
 from pygame.locals import *
 import click
@@ -31,41 +31,53 @@ from tensorflow.keras.initializers import TruncatedNormal
 
 import hnefatafl as tafl
 
+
 class StatsTracker():
-    def __init__(self,n_games_window=100,initial_num_games=0):
+    def __init__(self, n_games_window=100, initial_num_games=0):
         self.n_games_window = int(n_games_window)
-        self.a_outcomes     = [] # +1 for Attacker win, 0 = draw, -1 for Attacker loss
-        self.num_moves      = [] # Number of total moves in a game
-        self.game_durations = [] # in seconds
+        self.a_outcomes = []  # +1 for Attacker win, 0 = draw, -1 for Attacker loss
+        self.num_moves = []  # Number of total moves in a game
+        self.game_durations = []  # in seconds
         self.initial_num_games = int(initial_num_games)
+
     def __str__(self):
-        if len(self.a_outcomes)==0:
+        if len(self.a_outcomes) == 0:
             return "Insufficient games tracked for StatsTracker."
         else:
             return """Attacker win rate is {:0.4f} over the last {} games, {:0.4f} over total of {} games.
         Draw rate is {:0.4f} over the last {} games, {:0.4f} over total of {} games.
     Avg num moves is {:6.1f} over the last {} games, {:6.1f} over total of {} games.
 Avg game duration is {:0.4f} over the last {} games, {:0.4f} over total of {} games.""".format(
-              self.a_win_rate_window(), len(self.a_outcomes[-1*self.n_games_window:]),
-              self.a_win_rate_tot(), len(self.a_outcomes)+self.initial_num_games,
-              self.draw_rate_window(), len(self.a_outcomes[-1*self.n_games_window:]),
-              self.draw_rate_tot(), len(self.a_outcomes)+self.initial_num_games,
-              np.mean(self.num_moves[-1*self.n_games_window:]), len(self.num_moves[-1*self.n_games_window:]),
-              np.mean(self.num_moves),len(self.num_moves)+self.initial_num_games,
-              np.mean(self.game_durations[-1*self.n_games_window:]), len(self.game_durations[-1*self.n_games_window:]),
-              np.mean(self.game_durations),len(self.game_durations)+self.initial_num_games    )
+                self.a_win_rate_window(), len(self.a_outcomes[-1 * self.n_games_window:]),
+                self.a_win_rate_tot(), len(self.a_outcomes) + self.initial_num_games,
+                self.draw_rate_window(), len(self.a_outcomes[-1 * self.n_games_window:]),
+                self.draw_rate_tot(), len(self.a_outcomes) + self.initial_num_games,
+                np.mean(self.num_moves[-1 * self.n_games_window:]), len(self.num_moves[-1 * self.n_games_window:]),
+                np.mean(self.num_moves), len(self.num_moves) + self.initial_num_games,
+                np.mean(self.game_durations[-1 * self.n_games_window:]),
+                len(self.game_durations[-1 * self.n_games_window:]),
+                np.mean(self.game_durations), len(self.game_durations) + self.initial_num_games)
+
     def a_win_rate_tot(self):
-        return sum([1 if outcome> 0. else 0 for outcome in self.a_outcomes])/float(len(self.a_outcomes))
+        return sum([1 if outcome > 0. else 0 for outcome in self.a_outcomes]) / float(len(self.a_outcomes))
+
     def a_win_rate_window(self):
-        return sum([1 if outcome> 0. else 0 for outcome in self.a_outcomes[-1*self.n_games_window:]])/float(len(self.a_outcomes[-1*self.n_games_window:]))
+        return sum([1 if outcome > 0. else 0 for outcome in self.a_outcomes[-1 * self.n_games_window:]]) / float(
+            len(self.a_outcomes[-1 * self.n_games_window:]))
+
     def draw_rate_tot(self):
-        return sum([1 if outcome==0. else 0 for outcome in self.a_outcomes])/float(len(self.a_outcomes))
+        return sum([1 if outcome == 0. else 0 for outcome in self.a_outcomes]) / float(len(self.a_outcomes))
+
     def draw_rate_window(self):
-        return sum([1 if outcome==0. else 0 for outcome in self.a_outcomes[-1*self.n_games_window:]])/float(len(self.a_outcomes[-1*self.n_games_window:]))
-    def add_game_results(self,a_score,num_move,game_duration): # ascore: +1 = Attacker wins, 0 = draw, or -1 = Defender wins
+        return sum([1 if outcome == 0. else 0 for outcome in self.a_outcomes[-1 * self.n_games_window:]]) / float(
+            len(self.a_outcomes[-1 * self.n_games_window:]))
+
+    def add_game_results(self, a_score, num_move,
+                         game_duration):  # ascore: +1 = Attacker wins, 0 = draw, or -1 = Defender wins
         self.a_outcomes.append(a_score)
         self.num_moves.append(num_move)
         self.game_durations.append(game_duration)
+
     def num_games_total(self):
         return len(self.a_outcomes)
 
@@ -81,7 +93,7 @@ def do_random_move(move):
         piece = random.choice(pieces.sprites())
         move.select(piece)
         tafl.Current.add(piece)
-        if len(move.vm)==0:
+        if len(move.vm) == 0:
             move.select(piece)
             tafl.Current.empty()
             continue
@@ -98,6 +110,7 @@ def do_random_move(move):
                 tafl.Current.empty()
             break
 
+
 def do_dummy_1_defender_move(move):
     """ Very basic rules for defender logic.  King moves to escape or next-to-escape tiles if an option.
         Basically rules to clear room and have King escape.
@@ -110,8 +123,9 @@ def do_dummy_1_defender_move(move):
         for king in tafl.Kings:
             move.select(king)
             tafl.Current.add(king)
-            kx,ky = king.x_tile,king.y_tile
-            for pos in [(0,0),(0,10),(10,0),(10,10), (0,1),(1,0),(0,9),(1,10),(10,1),(9,0),(10,9),(9,10)]:
+            kx, ky = king.x_tile, king.y_tile
+            for pos in [(0, 0), (0, 10), (10, 0), (10, 10), (0, 1), (1, 0), (0, 9), (1, 10), (10, 1), (9, 0), (10, 9),
+                        (9, 10)]:
                 if pos in move.vm:
                     if move.is_valid_move(pos, tafl.Current.sprites()[0], True):
                         move.king_escaped(tafl.Kings)
@@ -123,8 +137,8 @@ def do_dummy_1_defender_move(move):
                     tafl.Current.empty()
                     return
             # If King can move to a higher position, do it some of the time.
-            if len(move.vm)>0 and random.random()<0.02:
-                pos = max(move.vm,key=lambda pos:max(pos[0],pos[1])) # Max positional move of King
+            if len(move.vm) > 0 and random.random() < 0.02:
+                pos = max(move.vm, key=lambda pos: max(pos[0], pos[1]))  # Max positional move of King
                 if move.is_valid_move(pos, tafl.Current.sprites()[0], True):
                     move.king_escaped(tafl.Kings)
                 if move.a_turn:
@@ -138,20 +152,21 @@ def do_dummy_1_defender_move(move):
             move.select(king)
             tafl.Current.empty()
 
-        #pieces = tafl.Defenders
+        # pieces = tafl.Defenders
         # If a defender is to the right or above the king, move down some of the time
-        if random.random()<0.6:
+        if random.random() < 0.6:
             for p in tafl.Defenders:
                 if (p.x_tile == kx and p.y_tile > ky) or (p.y_tile == ky and p.x_tile > kx):
                     move.select(p)
                     tafl.Current.add(p)
-                    if len(move.vm)==0:
+                    if len(move.vm) == 0:
                         move.select(p)
                         tafl.Current.empty()
                         continue
                     else:
-                        pos = min(move.vm,key=lambda pos:min(pos[0],pos[1])) # Lowest possible move of King-obstructing piece
-                        if move.is_valid_move(pos, tafl.Current.sprites()[0],True):
+                        pos = min(move.vm,
+                                  key=lambda pos: min(pos[0], pos[1]))  # Lowest possible move of King-obstructing piece
+                        if move.is_valid_move(pos, tafl.Current.sprites()[0], True):
                             if tafl.Current.sprites()[0] in tafl.Kings:
                                 move.king_escaped(tafl.Kings)
                             if move.a_turn:
@@ -160,21 +175,21 @@ def do_dummy_1_defender_move(move):
                                 move.remove_pieces(tafl.Attackers, tafl.Defenders, tafl.Kings)
 
                             move.end_turn(tafl.Current.sprites()[0])
-                            #move.select(p)
+                            # move.select(p)
                             tafl.Current.empty()
                             return
                         move.select(p)
                         tafl.Current.empty()
-        else: # Otherwise do a completely random move
+        else:  # Otherwise do a completely random move
             do_random_move(move)
             return
-        #return
+        # return
 
 
-def do_mostly_random_but_strike_to_kill_move(move): 
+def do_mostly_random_but_strike_to_kill_move(move):
     """ Very basic rules for defender logic.  King moves to escape or next-to-escape tiles if an option.
         And in 10% of moves, the king tries to move away from the center.  
-    """ 
+    """
 
     if move.a_turn:
         pieces = tafl.Attackers
@@ -183,7 +198,8 @@ def do_mostly_random_but_strike_to_kill_move(move):
         for king in tafl.Kings:
             move.select(king)
             tafl.Current.add(king)
-            for pos in [(0,0),(0,10),(10,0),(10,10), (0,1),(1,0),(0,9),(1,10),(10,1),(9,0),(10,9),(9,10)]:
+            for pos in [(0, 0), (0, 10), (10, 0), (10, 10), (0, 1), (1, 0), (0, 9), (1, 10), (10, 1), (9, 0), (10, 9),
+                        (9, 10)]:
                 if pos in move.vm:
                     if move.is_valid_move(pos, tafl.Current.sprites()[0], True):
                         move.king_escaped(tafl.Kings)
@@ -193,12 +209,13 @@ def do_mostly_random_but_strike_to_kill_move(move):
                         move.remove_pieces(tafl.Attackers, tafl.Defenders, tafl.Kings)
                     move.end_turn(tafl.Current.sprites()[0])
                     tafl.Current.empty()
-                    return 
-            if random.random()<0.10: # Push King out from center if possible sometimes
-                if len(move.vm)==0: break 
-                else: 
+                    return
+            if random.random() < 0.10:  # Push King out from center if possible sometimes
+                if len(move.vm) == 0:
+                    break
+                else:
                     for m in move.vm:
-                        if abs(5-m[0])>3 or abs(5-m[1])>3:
+                        if abs(5 - m[0]) > 3 or abs(5 - m[1]) > 3:
                             if move.is_valid_move(pos, tafl.Current.sprites()[0], True):
                                 move.king_escaped(tafl.Kings)
                             if move.a_turn:
@@ -207,7 +224,7 @@ def do_mostly_random_but_strike_to_kill_move(move):
                                 move.remove_pieces(tafl.Attackers, tafl.Defenders, tafl.Kings)
                         move.end_turn(tafl.Current.sprites()[0])
                         tafl.Current.empty()
-                        return 
+                        return
 
             move.select(king)
             tafl.Current.empty()
@@ -218,7 +235,7 @@ def do_mostly_random_but_strike_to_kill_move(move):
         move.select(piece)
         tafl.Current.add(piece)
 
-        if len(move.vm)==0:
+        if len(move.vm) == 0:
             move.select(piece)
             tafl.Current.empty()
             continue
@@ -236,7 +253,8 @@ def do_mostly_random_but_strike_to_kill_move(move):
             break
 
 
-def run_game(attacker_model=None,defender_model=None,human_attacker=False,human_defender=False,screen=None,game_name='Hnefatafl'):
+def run_game(attacker_model=None, defender_model=None, human_attacker=False, human_defender=False, screen=None,
+             game_name='Hnefatafl'):
     """Start and run one game of computer attacker vs computer defender hnefatafl.
  
        Args:
@@ -251,8 +269,10 @@ def run_game(attacker_model=None,defender_model=None,human_attacker=False,human_
     move = tafl.Move()
     tafl.initialize_pieces(board)
     if game_name == "simple":
-        if random.random()<0.5: tafl.Defenders.sprites()[0].kill()
-        else:                   tafl.Defenders.sprites()[1].kill()
+        if random.random() < 0.5:
+            tafl.Defenders.sprites()[0].kill()
+        else:
+            tafl.Defenders.sprites()[1].kill()
     a_game_states = []
     a_predicted_scores = []
     d_game_states = []
@@ -264,52 +284,52 @@ def run_game(attacker_model=None,defender_model=None,human_attacker=False,human_
         num_moves += 1
         """Text to display on bottom of game."""
         if screen is not None and not human_attacker and not human_defender:
-            tafl.update_image(screen, board, move, "Red: {}".format(len(tafl.Attackers.sprites())), "Blue: {}".format(len(tafl.Defenders.sprites())))
+            tafl.update_image(screen, board, move, "Red: {}".format(len(tafl.Attackers.sprites())),
+                              "Blue: {}".format(len(tafl.Defenders.sprites())))
         if screen is not None:
             for event in pygame.event.get():
                 if event.type == QUIT:
                     sys.exit()
                 if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                     pass
-        #if(num_moves > 8): # TEMP HACK FOR SIMPLE
-        if(num_moves >= 200):
+        if (num_moves >= 200):
             print("--- Draw game after {} moves".format(num_moves))
             a_predicted_scores.append(0.0)
             d_predicted_scores.append(0.0)
-            return play,a_game_states,a_predicted_scores[1:], d_game_states,d_predicted_scores[1:]
+            return play, a_game_states, a_predicted_scores[1:], d_game_states, d_predicted_scores[1:]
 
         if move.a_turn:
             if game_name == "simple" and False:
                 move.a_turn = False
-                continue  
-            #print("Attacker's Turn: Move {}".format(num_moves))
+                continue
+                # print("Attacker's Turn: Move {}".format(num_moves))
             if human_attacker:
                 play = do_human_turn(screen, board, move)
             elif attacker_model is None:
                 game_state = do_random_move(move)
-                predicted_score = (random.random()-0.5) * 2
+                predicted_score = (random.random() - 0.5) * 2
                 a_game_states.append(game_state)
                 a_predicted_scores.append(predicted_score)
             else:
                 if human_defender: time.sleep(0.5)
-                game_state,predicted_score = do_best_move(move,attacker_model,game_state_cache,sample_frac=0.90)
-                #game_state,predicted_score = do_best_move(move,attacker_model,game_state_cache,sample_frac=1.00,screen=screen,board=board)
+                game_state, predicted_score = do_best_move(move, attacker_model, game_state_cache, sample_frac=0.90)
+                # game_state,predicted_score = do_best_move(move,attacker_model,game_state_cache,sample_frac=1.00,screen=screen,board=board)
                 a_game_states.append(game_state)
                 a_predicted_scores.append(predicted_score)
         else:
-            #print("Defender's Turn: Move {}".format(num_moves))
+            # print("Defender's Turn: Move {}".format(num_moves))
             if human_defender:
                 play = do_human_turn(screen, board, move)
-            elif defender_model is None: 
-                #game_state = do_mostly_random_but_strike_to_kill_move(move)
+            elif defender_model is None:
+                # game_state = do_mostly_random_but_strike_to_kill_move(move)
                 game_state = do_dummy_1_defender_move(move)
-                predicted_score = (random.random()-0.5) * 2
+                predicted_score = (random.random() - 0.5) * 2
                 d_game_states.append(game_state)
                 d_predicted_scores.append(predicted_score)
             else:
                 if human_attacker: time.sleep(0.5)
-                game_state,predicted_score = do_best_move(move,defender_model,game_state_cache,sample_frac=0.90)
-                #game_state,predicted_score = do_best_move(move,defender_model,game_state_cache,sample_frac=1.00,screen=screen,board=board)
+                game_state, predicted_score = do_best_move(move, defender_model, game_state_cache, sample_frac=0.90)
+                # game_state,predicted_score = do_best_move(move,defender_model,game_state_cache,sample_frac=1.00,screen=screen,board=board)
                 d_game_states.append(game_state)
                 d_predicted_scores.append(predicted_score)
 
@@ -323,7 +343,8 @@ def run_game(attacker_model=None,defender_model=None,human_attacker=False,human_
                 tafl.update_image(screen, board, move, text, text2)
                 pygame.display.flip()
             if human_attacker or human_defender: play = end_game_loop(move)
-            return play,a_game_states,a_predicted_scores[1:], d_game_states,d_predicted_scores[1:] # i.e. the corrected scores from RL
+            return play, a_game_states, a_predicted_scores[1:], d_game_states, d_predicted_scores[
+                                                                               1:]  # i.e. the corrected scores from RL
         if move.king_killed:
             text = "--- King killed! Attackers win!"
             print(text)
@@ -334,9 +355,12 @@ def run_game(attacker_model=None,defender_model=None,human_attacker=False,human_
                 tafl.update_image(screen, board, move, text, text2)
                 pygame.display.flip()
             if human_attacker or human_defender: play = end_game_loop(move)
-            return play,a_game_states,a_predicted_scores[1:], d_game_states,d_predicted_scores[1:] # i.e. the corrected scores from RL
+            return play, a_game_states, a_predicted_scores[1:], d_game_states, d_predicted_scores[
+                                                                               1:]  # i.e. the corrected scores from RL
         if move.restart:
-            return play,a_game_states,a_predicted_scores[1:], d_game_states,d_predicted_scores[1:] # i.e. the corrected scores from RL
+            return play, a_game_states, a_predicted_scores[1:], d_game_states, d_predicted_scores[
+                                                                               1:]  # i.e. the corrected scores from RL
+
 
 def end_game_loop(move):
     while 1:  # Wait for human input
@@ -350,8 +374,8 @@ def end_game_loop(move):
                     return True
 
 
-def do_human_turn(screen,board,move):
-    #print("Starting human turn")
+def do_human_turn(screen, board, move):
+    # print("Starting human turn")
     current_turn = move.a_turn
 
     while 1:  # Wait for human input
@@ -368,7 +392,14 @@ def do_human_turn(screen,board,move):
                 if move.restart and event.key == pygame.K_y:
                     return True
                 if event.key == pygame.K_r:
+                    move.game_over = True
+                    if move.a_turn:
+                        move.escaped = True
+                    else:
+                        move.king_killed = True
                     move.restart = True
+                    move.a_turn = not move.a_turn
+                    tafl.Current.empty()
             if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                 pos = pygame.mouse.get_pos()
                 if move.game_over:
@@ -391,7 +422,6 @@ def do_human_turn(screen,board,move):
                     if tafl.Current.sprites()[0].rect.collidepoint(pos):
                         move.select(tafl.Current.sprites()[0])
                         tafl.Current.empty()
-                        #pygame.display.flip()
                     elif move.is_valid_move(pos, tafl.Current.sprites()[0]):
                         if tafl.Current.sprites()[0] in tafl.Kings:
                             move.king_escaped(tafl.Kings)
@@ -403,15 +433,15 @@ def do_human_turn(screen,board,move):
                         tafl.Current.empty()
 
         """Text to display on bottom of game."""
-        text2 = None
         if move.a_turn:
             text = "Attacker's Turn"
         if not move.a_turn:
             text = "Defender's Turn"
-        #if move.escaped:
+        text2 = "Resign? (r)"
+        # if move.escaped:
         #    text = "King escaped! Defenders win!"
         #    text2 = "Play again? y/n"
-        #if move.king_killed:
+        # if move.king_killed:
         #    text = "King killed! Attackers win!"
         #    text2 = "Play again? y/n"
         if move.restart and screen:
@@ -419,12 +449,11 @@ def do_human_turn(screen,board,move):
         tafl.update_image(screen, board, move, text, text2)
         pygame.display.flip()
 
-        if current_turn != move.a_turn: # turn ended
+        if current_turn != move.a_turn:  # turn ended
             return True
 
 
-
-def do_best_move(move,model,game_state_cache,sample_frac=1.0,screen=None,board=None):
+def do_best_move(move, model, game_state_cache, sample_frac=1.0, screen=None, board=None):
     """ Function to try all possible moves and select the best according to the model provided.
 
         Args: 
@@ -449,7 +478,7 @@ def do_best_move(move,model,game_state_cache,sample_frac=1.0,screen=None,board=N
             move.select(king)
             tafl.Current.add(king)
             # Can we win now?
-            for pos in tafl.SPECIALSQS.difference([((tafl.DIM-1)//2, (tafl.DIM-1)//2)]):
+            for pos in tafl.SPECIALSQS.difference([((tafl.DIM - 1) // 2, (tafl.DIM - 1) // 2)]):
                 if pos in move.vm:
                     if move.is_valid_move(pos, tafl.Current.sprites()[0], True):
                         move.king_escaped(tafl.Kings)
@@ -459,7 +488,7 @@ def do_best_move(move,model,game_state_cache,sample_frac=1.0,screen=None,board=N
                         move.remove_pieces(tafl.Attackers, tafl.Defenders, tafl.Kings, king_is_special)
                     move.end_turn(tafl.Current.sprites()[0])
                     tafl.Current.empty()
-                    return game_state,1.0
+                    return game_state, 1.0
             '''
             # Can we land next to winning square?
             for pos in tafl.SPECIALSQS.difference([((tafl.DIM-1)//2, (tafl.DIM-1)//2)]):
@@ -480,7 +509,7 @@ def do_best_move(move,model,game_state_cache,sample_frac=1.0,screen=None,board=N
             move.select(king)
             tafl.Current.empty()
 
-    if(len(pieces)==0): return game_state,0.0
+    if (len(pieces) == 0): return game_state, 0.0
 
     best_score = -1000000.0
     best_piece = pieces.sprites()[0]
@@ -490,14 +519,14 @@ def do_best_move(move,model,game_state_cache,sample_frac=1.0,screen=None,board=N
     for piece in pieces:
         if random.random() > sample_frac: continue
         if screen and board: time.sleep(1.0)
-        move.select(piece) # Move class defines all possible valid moves
+        move.select(piece)  # Move class defines all possible valid moves
         tafl.Current.add(piece)
-        if len(move.vm)==0: # No valid moves for this piece, move on
+        if len(move.vm) == 0:  # No valid moves for this piece, move on
             move.select(piece)
             tafl.Current.empty()
             continue
         else:
-            num_best_so_far=0
+            num_best_so_far = 0
             for m in move.vm:
                 if random.random() > sample_frac: continue
 
@@ -506,7 +535,7 @@ def do_best_move(move,model,game_state_cache,sample_frac=1.0,screen=None,board=N
                     for event in pygame.event.get():
                         if event.type == QUIT:
                             sys.exit()
-                    tafl.update_image(screen, board, move, "DEBUG MODE","Score: {:0.4f}".format(0))
+                    tafl.update_image(screen, board, move, "DEBUG MODE", "Score: {:0.4f}".format(0))
                     pygame.display.flip()
                     time.sleep(1.0)
                 move.is_valid_move(m, tafl.Current.sprites()[0], True)
@@ -515,49 +544,52 @@ def do_best_move(move,model,game_state_cache,sample_frac=1.0,screen=None,board=N
                 else:
                     move.remove_pieces(tafl.Attackers, tafl.Defenders, tafl.Kings, king_is_special)
                 game_state = game_state_to_3d_array()
-                if move.a_turn and move.king_killed: # Move would kill king, do it.
+                if move.a_turn and move.king_killed:  # Move would kill king, do it.
                     best_score = 1.0
                     best_piece = piece
                     best_move = m
                     best_vm = move.vm
-                try: # model.predict crashed once... 
-                    #score = model.predict(game_state.reshape(1,11*11))[0][0]
-                    #score = model.predict(game_state.reshape(1,11,11,1))[0][0]
-                    score = model.predict(game_state.reshape(1,tafl.DIM*tafl.DIM*3))[0][0]
+                try:  # model.predict crashed once...
+                    # score = model.predict(game_state.reshape(1,11*11))[0][0]
+                    # score = model.predict(game_state.reshape(1,11,11,1))[0][0]
+                    score = model.predict(game_state.reshape(1, tafl.DIM * tafl.DIM * 3))[0][0]
                 except:
                     score = -1.0
-                    #score = random.random()
+                    # score = random.random()
                 if screen and board:
                     for event in pygame.event.get():
                         if event.type == QUIT:
                             sys.exit()
-                    tafl.update_image(screen, board, move, "DEBUG MODE","Score: {:0.4f}".format(score))
+                    tafl.update_image(screen, board, move, "DEBUG MODE", "Score: {:0.4f}".format(score))
                     pygame.display.flip()
                     time.sleep(0.5)
 
                 # Reverse candidate move to log the piece location correctly
-                #print("len pieces1", len(tafl.Pieces))
+                # print("len pieces1", len(tafl.Pieces))
                 move.undo(tafl.Current.sprites()[0])
-                #print("len pieces2", len(tafl.Pieces))
+                # print("len pieces2", len(tafl.Pieces))
 
-                if score == best_score: score = score + random.uniform(-0.01,0.01) # Add a little noise if they are exactly equal
+                if score == best_score: score = score + random.uniform(-0.01,
+                                                                       0.01)  # Add a little noise if they are exactly equal
                 # Find best score but don't let it keep repeating the same states
-                if score > best_score and not next((True for elem in itertools.islice(game_state_cache,4,game_state_cache.maxlen) if np.array_equal(elem,game_state)), False):
+                if score > best_score and not next(
+                        (True for elem in itertools.islice(game_state_cache, 4, game_state_cache.maxlen) if
+                         np.array_equal(elem, game_state)), False):
                     best_score = score
                     best_piece = piece
-                    best_move  = m
-                    best_vm    = move.vm
-                    #print("best stats: ",best_score,best_piece,(best_piece.x_tile,best_piece.y_tile),best_move)
-                    #print("Valid moves: ",move.vm)
+                    best_move = m
+                    best_vm = move.vm
+                    # print("best stats: ",best_score,best_piece,(best_piece.x_tile,best_piece.y_tile),best_move)
+                    # print("Valid moves: ",move.vm)
 
-        move.select(piece) # Deselect
+        move.select(piece)  # Deselect
         tafl.Current.empty()
 
     if best_piece is None or best_move is None:
         print("NO BEST MOVE! No moves at all or a Draw?")
-        return game_state,0.0
+        return game_state, 0.0
 
-    #print(" ",best_score)
+    # print(" ",best_score)
     move.select(best_piece)
     tafl.Current.add(best_piece)
 
@@ -565,7 +597,7 @@ def do_best_move(move,model,game_state_cache,sample_frac=1.0,screen=None,board=N
         print('best vm: ', best_vm)
         print('move vm: ', move.vm)
 
-    if move.is_valid_move(best_move,tafl.Current.sprites()[0], True):
+    if move.is_valid_move(best_move, tafl.Current.sprites()[0], True):
         if tafl.Current.sprites()[0] in tafl.Kings:
             move.king_escaped(tafl.Kings)
         if move.a_turn:
@@ -578,15 +610,15 @@ def do_best_move(move,model,game_state_cache,sample_frac=1.0,screen=None,board=N
         move.end_turn(tafl.Current.sprites()[0])
         tafl.Current.empty()
 
-        #print(game_state,best_score)
-        return game_state,best_score
+        # print(game_state,best_score)
+        return game_state, best_score
     else:
         print("ERROR: Best move logic failed... Fix! Debugging info follows:")
-        print("BEST MOVE",best_move)
-        print("Current",tafl.Current.sprites()[0],(best_piece.x_tile,best_piece.y_tile), move.row, move.col)
+        print("BEST MOVE", best_move)
+        print("Current", tafl.Current.sprites()[0], (best_piece.x_tile, best_piece.y_tile), move.row, move.col)
         print("Valid moves", move.vm)
-        print("reValid moves", move.valid_moves(best_piece.special_sqs,debug=True))
-        #do_human_turn(screen, board, move)
+        print("reValid moves", move.valid_moves(best_piece.special_sqs, debug=True))
+        # do_human_turn(screen, board, move)
         time.sleep(30)
         sys.exit(1)
 
@@ -596,17 +628,18 @@ def initialize_random_nn_model():
     """
     print("Initializing randomized NN model")
     model = Sequential()
-    model.add(Dense(2*tafl.DIM*tafl.DIM, input_dim=tafl.DIM*tafl.DIM,kernel_initializer='normal', activation='relu'))
+    model.add(
+        Dense(2 * tafl.DIM * tafl.DIM, input_dim=tafl.DIM * tafl.DIM, kernel_initializer='normal', activation='relu'))
     model.add(Dropout(0.1))
-    model.add(Dense(tafl.DIM*tafl.DIM, kernel_initializer='normal',activation='relu'))
+    model.add(Dense(tafl.DIM * tafl.DIM, kernel_initializer='normal', activation='relu'))
     model.add(Dropout(0.1))
     # Adding more test layers
 
-    model.add(Dense(20, kernel_initializer='normal',activation='relu'))
+    model.add(Dense(20, kernel_initializer='normal', activation='relu'))
     model.add(Dropout(0.1))
-    model.add(Dense(5, kernel_initializer='normal',activation='relu'))
+    model.add(Dense(5, kernel_initializer='normal', activation='relu'))
 
-    model.add(Dense(1,kernel_initializer='normal'))
+    model.add(Dense(1, kernel_initializer='normal'))
 
     learning_rate = 0.05
     momentum = 0.8
@@ -616,27 +649,29 @@ def initialize_random_nn_model():
     model.summary()
     return model
 
+
 def initialize_random_nn_model_v2():
     """ Initialize Keras Deep Neural Networks models and print summary.
     """
     print("Initializing randomized CNN model")
     std = 0.05
     model = Sequential()
-    model.add(Conv2D( 32, (3,3), input_shape=(11,11,1), padding='same',activation='relu', strides=(1,1), kernel_initializer=TruncatedNormal(mean=0.0, stddev=std, seed=None)))
-    #model.add(Conv2D( 64, (3,3), padding='same',activation='relu', strides=(1,1), kernel_initializer=TruncatedNormal(mean=0.0, stddev=std, seed=None)))
-    #model.add(Conv2D(128, (3,3), padding='same',activation='relu', strides=(2,2), kernel_initializer=TruncatedNormal(mean=0.0, stddev=std, seed=None)))
-    #model.add(Dropout(0.1))
-    #model.add(Conv2D(64, (3,3), activation='relu',kernel_initializer=TruncatedNormal(mean=0.0, stddev=std, seed=None)))
+    model.add(Conv2D(32, (3, 3), input_shape=(11, 11, 1), padding='same', activation='relu', strides=(1, 1),
+                     kernel_initializer=TruncatedNormal(mean=0.0, stddev=std, seed=None)))
+    # model.add(Conv2D( 64, (3,3), padding='same',activation='relu', strides=(1,1), kernel_initializer=TruncatedNormal(mean=0.0, stddev=std, seed=None)))
+    # model.add(Conv2D(128, (3,3), padding='same',activation='relu', strides=(2,2), kernel_initializer=TruncatedNormal(mean=0.0, stddev=std, seed=None)))
+    # model.add(Dropout(0.1))
+    # model.add(Conv2D(64, (3,3), activation='relu',kernel_initializer=TruncatedNormal(mean=0.0, stddev=std, seed=None)))
     model.add(Flatten())
-    #model.add(Dropout(0.1))
+    # model.add(Dropout(0.1))
     # Adding more test layers
 
-    model.add(Dense(64, activation='relu',kernel_initializer=TruncatedNormal(mean=0.0, stddev=std, seed=None)))
+    model.add(Dense(64, activation='relu', kernel_initializer=TruncatedNormal(mean=0.0, stddev=std, seed=None)))
     model.add(Dropout(0.01))
-    model.add(Dense(32, activation='relu',kernel_initializer=TruncatedNormal(mean=0.0, stddev=std, seed=None)))
-    model.add(Dense(16, activation='relu',kernel_initializer=TruncatedNormal(mean=0.0, stddev=std, seed=None)))
+    model.add(Dense(32, activation='relu', kernel_initializer=TruncatedNormal(mean=0.0, stddev=std, seed=None)))
+    model.add(Dense(16, activation='relu', kernel_initializer=TruncatedNormal(mean=0.0, stddev=std, seed=None)))
 
-    model.add(Dense(1,kernel_initializer=TruncatedNormal(mean=0.0, stddev=std, seed=None)))
+    model.add(Dense(1, kernel_initializer=TruncatedNormal(mean=0.0, stddev=std, seed=None)))
 
     learning_rate = 0.001
     momentum = 0.8
@@ -646,23 +681,25 @@ def initialize_random_nn_model_v2():
     model.summary()
     return model
 
+
 def initialize_random_nn_model_3d():
     """ Initialize Keras Deep Neural Networks models and print summary.
         Architecture for the 3d game states.
     """
     print("Initializing randomized NN model")
     model = Sequential()
-    model.add(Dense(2*tafl.DIM*tafl.DIM*3, input_dim=tafl.DIM*tafl.DIM*3,kernel_initializer='normal', activation='relu'))
+    model.add(Dense(2 * tafl.DIM * tafl.DIM * 3, input_dim=tafl.DIM * tafl.DIM * 3, kernel_initializer='normal',
+                    activation='relu'))
     model.add(Dropout(0.01))
-    model.add(Dense(tafl.DIM*tafl.DIM*3, kernel_initializer='normal',activation='relu'))
+    model.add(Dense(tafl.DIM * tafl.DIM * 3, kernel_initializer='normal', activation='relu'))
     model.add(Dropout(0.01))
     # Adding more test layers
 
-    model.add(Dense(tafl.DIM*3, kernel_initializer='normal',activation='relu'))
+    model.add(Dense(tafl.DIM * 3, kernel_initializer='normal', activation='relu'))
     model.add(Dropout(0.01))
-    model.add(Dense(tafl.DIM//2, kernel_initializer='normal',activation='relu'))
+    model.add(Dense(tafl.DIM // 2, kernel_initializer='normal', activation='relu'))
 
-    model.add(Dense(1,kernel_initializer='normal'))
+    model.add(Dense(1, kernel_initializer='normal'))
 
     learning_rate = 0.005
     momentum = 0.8
@@ -672,17 +709,19 @@ def initialize_random_nn_model_3d():
     model.summary()
     return model
 
+
 def initialize_random_nn_model_3d_dense_v2():
     """ Initialize Keras Deep Neural Networks models and print summary.
         Architecture for the 3d game states.
     """
     print("Initializing randomized NN model")
     model = Sequential()
-    model.add(Dense(tafl.DIM*tafl.DIM*3, input_dim=tafl.DIM*tafl.DIM*3, kernel_initializer='normal',activation='relu'))
+    model.add(Dense(tafl.DIM * tafl.DIM * 3, input_dim=tafl.DIM * tafl.DIM * 3, kernel_initializer='normal',
+                    activation='relu'))
     model.add(Dropout(0.1))
-    model.add(Dense(tafl.DIM*3, kernel_initializer='normal',activation='relu'))
+    model.add(Dense(tafl.DIM * 3, kernel_initializer='normal', activation='relu'))
     model.add(Dropout(0.1))
-    model.add(Dense(1,kernel_initializer='normal'))
+    model.add(Dense(1, kernel_initializer='normal'))
 
     learning_rate = 0.001
     momentum = 0.9
@@ -692,21 +731,23 @@ def initialize_random_nn_model_3d_dense_v2():
     model.summary()
     return model
 
+
 def initialize_random_nn_model_3d_dense_v3():
     """ Initialize Keras Deep Neural Networks models and print summary.
         Architecture for the 3d game states, boxy layout.
     """
     print("Initializing randomized NN model")
     model = Sequential()
-    model.add(Dense(tafl.DIM*tafl.DIM*3, input_dim=tafl.DIM*tafl.DIM*3,kernel_initializer='normal', activation='relu'))
+    model.add(Dense(tafl.DIM * tafl.DIM * 3, input_dim=tafl.DIM * tafl.DIM * 3, kernel_initializer='normal',
+                    activation='relu'))
     model.add(Dropout(0.05))
-    model.add(Dense(tafl.DIM*tafl.DIM*3, kernel_initializer='normal',activation='relu'))
+    model.add(Dense(tafl.DIM * tafl.DIM * 3, kernel_initializer='normal', activation='relu'))
     model.add(Dropout(0.05))
-    model.add(Dense(tafl.DIM*tafl.DIM*3, kernel_initializer='normal',activation='relu'))
+    model.add(Dense(tafl.DIM * tafl.DIM * 3, kernel_initializer='normal', activation='relu'))
     model.add(Dropout(0.05))
-    model.add(Dense(tafl.DIM*tafl.DIM*3, kernel_initializer='normal',activation='relu'))
+    model.add(Dense(tafl.DIM * tafl.DIM * 3, kernel_initializer='normal', activation='relu'))
 
-    model.add(Dense(1,kernel_initializer='normal'))
+    model.add(Dense(1, kernel_initializer='normal'))
 
     learning_rate = 0.010
     momentum = 0.8
@@ -716,13 +757,14 @@ def initialize_random_nn_model_3d_dense_v3():
     model.summary()
     return model
 
+
 def game_state_to_array():
     """ 2D Numpy array representation of game state for ML model.
     """
     if tafl.Attackers is None or tafl.Defenders is None or tafl.Kings is None:
         print("Game not properly initialized.  Exiting.")
         sys.exit(1)
-    arr = np.zeros((tafl.DIM,tafl.DIM),dtype=int)
+    arr = np.zeros((tafl.DIM, tafl.DIM), dtype=int)
 
     for p in tafl.Attackers:
         arr[p.x_tile][p.y_tile] = '1'
@@ -733,9 +775,11 @@ def game_state_to_array():
 
     return arr
 
+
 A_DIM = 0
 D_DIM = 2
 K_DIM = 1
+
 
 def game_state_to_3d_array():
     """ 3D Numpy array representation of game state for ML model.
@@ -745,7 +789,7 @@ def game_state_to_3d_array():
     if tafl.Attackers is None or tafl.Defenders is None or tafl.Kings is None:
         print("Game not properly initialized.  Exiting.")
         sys.exit(1)
-    arr = np.zeros((tafl.DIM,tafl.DIM,3),dtype=int)
+    arr = np.zeros((tafl.DIM, tafl.DIM, 3), dtype=int)
 
     for p in tafl.Attackers:
         arr[p.x_tile][p.y_tile][A_DIM] = '1'
@@ -756,7 +800,8 @@ def game_state_to_3d_array():
 
     return arr
 
-#def game_state_3d_to_2d(arr):
+
+# def game_state_3d_to_2d(arr):
 #    for arr[A_DIM]
 
 
@@ -768,16 +813,17 @@ def expand_game_states_symmetries(game_states):
     """
     # Append all possible 90deg rotations:
     game_states_temp = [np.rot90(gs) for gs in game_states]
-    game_states = np.concatenate((game_states,game_states_temp))
+    game_states = np.concatenate((game_states, game_states_temp))
     game_states_temp = [np.rot90(gs) for gs in game_states_temp]
-    game_states = np.concatenate((game_states,game_states_temp))
+    game_states = np.concatenate((game_states, game_states_temp))
     game_states_temp = [np.rot90(gs) for gs in game_states_temp]
-    game_states = np.concatenate((game_states,game_states_temp))
+    game_states = np.concatenate((game_states, game_states_temp))
 
     # Now mirror all possible rotations
-    game_states_temp = [np.flip(gs,axis=0) for gs in game_states]
-    game_states = np.concatenate((game_states,game_states_temp))
+    game_states_temp = [np.flip(gs, axis=0) for gs in game_states]
+    game_states = np.concatenate((game_states, game_states_temp))
     return game_states
+
 
 def unison_shuffled_copies(a, b):
     """ Used to shuffle the game states and corrected scores before retraining.
@@ -786,62 +832,73 @@ def unison_shuffled_copies(a, b):
     p = np.random.permutation(len(a))
     return a[p], b[p]
 
-def smooth_corrected_scores(corrected_scores,num_to_smooth=50):
+
+def smooth_corrected_scores(corrected_scores, num_to_smooth=50):
     """ Smooth out the lead up to the final state for faster learning.
         I tried a number of strategies for speeding up training...
     """
     num_to_smooth = min(num_to_smooth, len(corrected_scores))
-    for i in range(num_to_smooth-1):
-        corrected_scores[-1*(i+2)] = (corrected_scores[-1*(i+2)] + 2*corrected_scores[-1*(i+1)]) / 3. # weighted average
+    for i in range(num_to_smooth - 1):
+        corrected_scores[-1 * (i + 2)] = (corrected_scores[-1 * (i + 2)] + 2 * corrected_scores[
+            -1 * (i + 1)]) / 3.  # weighted average
 
-def smooth_corrected_scores_exp(corrected_scores,dynamic=True,decay_constant=5.):
+
+def smooth_corrected_scores_exp(corrected_scores, dynamic=True, decay_constant=5.):
     """ Smooth out the lead up to the final state for faster learning.
         Exponential strategy.  dynamic mode = True means exp weight scales with game length.
         False means the decay_constant in terms of num game states is used.  
     """
-    if dynamic: decay_constant = float(len(corrected_scores))/2. # 1/2 game length
-    for i in range(len(corrected_scores)//2-1):
-        corrected_scores[-1*(i+2)] = (corrected_scores[-1*(i+2)] + math.exp(-i/decay_constant)*corrected_scores[-1*(i+1)]) / (1. + math.exp(-i/decay_constant))
+    if dynamic: decay_constant = float(len(corrected_scores)) / 2.  # 1/2 game length
+    for i in range(len(corrected_scores) // 2 - 1):
+        corrected_scores[-1 * (i + 2)] = (corrected_scores[-1 * (i + 2)] + math.exp(-i / decay_constant) *
+                                          corrected_scores[-1 * (i + 1)]) / (1. + math.exp(-i / decay_constant))
+
 
 @click.command()
-@click.option('-g',       '--game-name',                         default='Hnefatafl', help='Name of Tafl variant to play')
-@click.option('-ha/-aa',  '--human-attacker/--ai-attacker',      default=False, help='Set to play attacker manually')
-@click.option('-hd/-ad',  '--human-defender/--ai-defender',      default=False, help='Set to play defender manually')
-@click.option('-i/-b',    '--interactive/--batch',               default=False, help='Set true in order to watch AI vs AI matches')
-@click.option('-ta/-na',  '--train-attacker/--no-train-attacker',default=False, help='Set to update attacker AI after each game')
-@click.option('-td/-nd',  '--train-defender/--no-train-defender',default=False, help='Set to update defender AI after each game')
-@click.option('-dt/-st',  '--dynamic-train/--static-train'      ,default=False, help='Set to pause defender AI when lopsided')
-@click.option('-c',       '--cache-model-every',                 default=100,   help='Cache the Keras DNN model every so many games')
-@click.option('-s/-ns',   '--use-symmetry/--no-symmetry',        default=False, help='Set to train using symmetrical board states')
-@click.option('-al',      '--attacker-load',                     default=0,     help='Attacker model file num to load')
-@click.option('-dl',      '--defender-load',                     default=0,     help='Defender model file num to load')
-@click.option('-sl',      '--stats-load',                        default=0,     help='Stats model file num to load')
-@click.option('-v',       '--version',                           default=7,     help='Model version number')
-#@click.option('-r/-nr',   '--resume/--no-resume',                default=False, help='Resume from latest cache for provided game/version.')
-def main(game_name,human_attacker,human_defender,interactive,train_attacker,train_defender,dynamic_train,cache_model_every,use_symmetry,
-         attacker_load,defender_load,stats_load,version):
+@click.option('-g', '--game-name', default='Hnefatafl', help='Name of Tafl variant to play')
+@click.option('-ha/-aa', '--human-attacker/--ai-attacker', default=False, help='Set to play attacker manually')
+@click.option('-hd/-ad', '--human-defender/--ai-defender', default=False, help='Set to play defender manually')
+@click.option('-i/-b', '--interactive/--batch', default=False, help='Set true in order to watch AI vs AI matches')
+@click.option('-ta/-na', '--train-attacker/--no-train-attacker', default=False,
+              help='Set to update attacker AI after each game')
+@click.option('-td/-nd', '--train-defender/--no-train-defender', default=False,
+              help='Set to update defender AI after each game')
+@click.option('-dt/-st', '--dynamic-train/--static-train', default=False, help='Set to pause defender AI when lopsided')
+@click.option('-c', '--cache-model-every', default=100, help='Cache the Keras DNN model every so many games')
+@click.option('-s/-ns', '--use-symmetry/--no-symmetry', default=False,
+              help='Set to train using symmetrical board states')
+@click.option('-al', '--attacker-load', default=0, help='Attacker model file num to load')
+@click.option('-dl', '--defender-load', default=0, help='Defender model file num to load')
+@click.option('-sl', '--stats-load', default=0, help='Stats model file num to load')
+@click.option('-v', '--version', default=7, help='Model version number')
+# @click.option('-r/-nr',   '--resume/--no-resume',                default=False, help='Resume from latest cache for provided game/version.')
+def main(game_name, human_attacker, human_defender, interactive, train_attacker, train_defender, dynamic_train,
+         cache_model_every, use_symmetry,
+         attacker_load, defender_load, stats_load, version):
     """Main training loop."""
 
     global king_is_special
     king_is_special = False
 
     # True to let human players play
-    #human_attacker = False
-    #human_defender = False
+    # human_attacker = False
+    # human_defender = False
     # True to display the pygame screen to watch the game
     interactive = human_attacker or human_defender or interactive
     # True to Update the attacker/defender models as you go
-    #train_attacker = True
-    #train_defender = False
+    # train_attacker = True
+    # train_defender = False
 
-    #cache_model_every = 50 # games
-    #use_symmetry = False # Method needs to be updated for 3d game states
+    # cache_model_every = 50 # games
+    # use_symmetry = False # Method needs to be updated for 3d game states
 
-    if human_attacker and train_attacker: # Sorry, I can't train humans
-        print("Conflicting options human_attacker={} and train_attacker={}. Exiting.".format(human_attacker,train_attacker))
+    if human_attacker and train_attacker:  # Sorry, I can't train humans
+        print("Conflicting options human_attacker={} and train_attacker={}. Exiting.".format(human_attacker,
+                                                                                             train_attacker))
         sys.exit(1)
     if human_defender and train_defender:
-        print("Conflicting options human_defender={} and train_defender={}. Exiting.".format(human_defender,train_defender))
+        print("Conflicting options human_defender={} and train_defender={}. Exiting.".format(human_defender,
+                                                                                             train_defender))
         sys.exit(1)
 
     train_attacker_orig = train_attacker
@@ -854,38 +911,43 @@ def main(game_name,human_attacker,human_defender,interactive,train_attacker,trai
         screen = None
 
     tafl.initialize_groups()
-    temp_board = tafl.Board(game_name) # Just used to initialize global DIM for game_name...
+    temp_board = tafl.Board(game_name)  # Just used to initialize global DIM for game_name...
 
     num_train_games_attacker = attacker_load
     num_train_games_defender = defender_load
-    #version         = 6  # Used to track major changes/restarts
+    # version         = 6  # Used to track major changes/restarts
 
-    save_dir = 'models_{}_v{}'.format(game_name.lower(),version)
+    save_dir = 'models_{}_v{}'.format(game_name.lower(), version)
     if not human_attacker or not human_defender: os.makedirs(save_dir, exist_ok=True)
 
     stats_tracker_loaded = False
     attacker_model = None
     if not human_attacker:
         # Set to 0 to initialize random DNNs or used to load saved models:
-        #attacker_load   = 0
-        attacker_load   = num_train_games_attacker
-        #if attacker_load==0: attacker_model = initialize_random_nn_model_3d()
-        if attacker_load==0: attacker_model = initialize_random_nn_model_3d_dense_v3()
-        else:                attacker_model = load_model('{}/attacker_model_{}_games.h5'.format(save_dir,attacker_load))
+        # attacker_load   = 0
+        attacker_load = num_train_games_attacker
+        # if attacker_load==0: attacker_model = initialize_random_nn_model_3d()
+        if attacker_load == 0:
+            attacker_model = initialize_random_nn_model_3d_dense_v3()
+        else:
+            attacker_model = load_model('{}/attacker_model_{}_games.h5'.format(save_dir, attacker_load))
 
     defender_model = None
     if not human_defender:
         # Set to 0 to initialize random DNNs (-1 for defender has some basic rules) or used to load saved models:
-        #defender_load   = -1
-        #defender_load   = num_train_games_defender
-        if defender_load == -1:  defender_model = None  # Defaults to mostly random + some extra King movements
-        #elif defender_load == 0: defender_model = initialize_random_nn_model_3d()
-        elif defender_load == 0: defender_model = initialize_random_nn_model_3d_dense_v3()
-        else:                    defender_model = load_model('{}/defender_model_{}_games.h5'.format(save_dir,defender_load))
+        # defender_load   = -1
+        # defender_load   = num_train_games_defender
+        if defender_load == -1:
+            defender_model = None  # Defaults to mostly random + some extra King movements
+        # elif defender_load == 0: defender_model = initialize_random_nn_model_3d()
+        elif defender_load == 0:
+            defender_model = initialize_random_nn_model_3d_dense_v3()
+        else:
+            defender_model = load_model('{}/defender_model_{}_games.h5'.format(save_dir, defender_load))
 
     stats = None
-    if stats_load>0 and (not human_attacker or not human_defender): # Pick up the last cached stats tracker
-        stats = pickle.load( open('{}/StatsTracker_{}_games.pkl'.format(save_dir,stats_load), 'rb') )
+    if stats_load > 0 and (not human_attacker or not human_defender):  # Pick up the last cached stats tracker
+        stats = pickle.load(open('{}/StatsTracker_{}_games.pkl'.format(save_dir, stats_load), 'rb'))
     if not stats:
         stats = StatsTracker(200)
 
@@ -896,73 +958,92 @@ def main(game_name,human_attacker,human_defender,interactive,train_attacker,trai
 
         start = timer()
 
-        play, a_game_states,a_corrected_scores, d_game_states,d_corrected_scores = \
-          run_game(attacker_model,defender_model,human_attacker,human_defender,screen,game_name)
+        play, a_game_states, a_corrected_scores, d_game_states, d_corrected_scores = \
+            run_game(attacker_model, defender_model, human_attacker, human_defender, screen, game_name)
 
         end = timer()
         game_duration = end - start
 
         # Just some basic debugging to monitor how the training is progressing:
-        print( """Attacker has played:     {} games,\nDefender has played:     {} games,\nNum moves this game:     {} ({:0.3f} sec)"""
-              .format(num_train_games_attacker,num_train_games_defender,len(a_corrected_scores)+len(d_corrected_scores),game_duration))
+        print(
+            """Attacker has played:     {} games,\nDefender has played:     {} games,\nNum moves this game:     {} ({:0.3f} sec)"""
+            .format(num_train_games_attacker, num_train_games_defender,
+                    len(a_corrected_scores) + len(d_corrected_scores), game_duration))
 
         # Add Attacker outcome to the StatsTracker
-        if len(a_corrected_scores)>0:  # AI Attacker and/or defender
-            stats.add_game_results(a_corrected_scores[-1],len(a_corrected_scores)+len(d_corrected_scores),game_duration)
+        if len(a_corrected_scores) > 0:  # AI Attacker and/or defender
+            stats.add_game_results(a_corrected_scores[-1], len(a_corrected_scores) + len(d_corrected_scores),
+                                   game_duration)
             print(stats)
-        elif len(d_corrected_scores)>0: # AI defender only
-            stats.add_game_results(-1*d_corrected_scores[-1],len(a_corrected_scores)+len(d_corrected_scores),game_duration)
+        elif len(d_corrected_scores) > 0:  # AI defender only
+            stats.add_game_results(-1 * d_corrected_scores[-1], len(a_corrected_scores) + len(d_corrected_scores),
+                                   game_duration)
             print(stats)
-        #else: # PvP stats not tracked
+        # else: # PvP stats not tracked
 
         # Make a decision about whether or not to keep training Defender
-        if dynamic_train and (stats.a_win_rate_window() + stats.draw_rate_window()/2.) < 0.40:
-            train_defender = False # Too smart, pause training
-        else: train_defender = train_defender_orig
+        if dynamic_train and (stats.a_win_rate_window() + stats.draw_rate_window() / 2.) < 0.40:
+            train_defender = False  # Too smart, pause training
+        else:
+            train_defender = train_defender_orig
 
-        if dynamic_train and ((1 - stats.a_win_rate_window() - stats.draw_rate_window()) + stats.draw_rate_window()/2.) < 0.40:
-            train_attacker = False # Too smart, pause training
-        else: train_attacker = train_attacker_orig
+        if dynamic_train and (
+                (1 - stats.a_win_rate_window() - stats.draw_rate_window()) + stats.draw_rate_window() / 2.) < 0.40:
+            train_attacker = False  # Too smart, pause training
+        else:
+            train_attacker = train_attacker_orig
 
-        if train_attacker and attacker_model is not None and len(a_corrected_scores)>0:
-            #print(np.array_repr( a_game_states[-2] ).replace('\n', ''))
-            #print(np.array_repr( a_game_states[-1] ).replace('\n', ''))
-            print( """Last Attacker states: {}""".format(' '.join(['{:+0.4f}'.format(entry) for entry in a_corrected_scores[-16:-1]])))
+        if train_attacker and attacker_model is not None and len(a_corrected_scores) > 0:
+            # print(np.array_repr( a_game_states[-2] ).replace('\n', ''))
+            # print(np.array_repr( a_game_states[-1] ).replace('\n', ''))
+            print("""Last Attacker states: {}""".format(
+                ' '.join(['{:+0.4f}'.format(entry) for entry in a_corrected_scores[-16:-1]])))
             smooth_corrected_scores_exp(a_corrected_scores)
-            print( """            Smoothed: {}""".format(' '.join(['{:+0.4f}'.format(entry) for entry in a_corrected_scores[-15:]])))
-            a_game_states,a_corrected_scores = unison_shuffled_copies(np.array(a_game_states),np.array(a_corrected_scores))
+            print("""            Smoothed: {}""".format(
+                ' '.join(['{:+0.4f}'.format(entry) for entry in a_corrected_scores[-15:]])))
+            a_game_states, a_corrected_scores = unison_shuffled_copies(np.array(a_game_states),
+                                                                       np.array(a_corrected_scores))
             if use_symmetry:
                 a_game_states = expand_game_states_symmetries(a_game_states)
                 print(f"a_game_states shape: {a_game_states.shape}")
-                a_corrected_scores = np.tile(a_corrected_scores,8)
+                a_corrected_scores = np.tile(a_corrected_scores, 8)
                 print(f"a_corrected_scores shape: {a_corrected_scores.shape}")
-            #attacker_model.fit(a_game_states.reshape(-1,11*11),a_corrected_scores,epochs=1,batch_size=1,verbose=0)
-            #attacker_model.fit(a_game_states.reshape(-1,11,11,1),a_corrected_scores,epochs=1,batch_size=1,verbose=0)
-            attacker_model.fit(a_game_states.reshape(-1,tafl.DIM*tafl.DIM*3),a_corrected_scores,epochs=1,batch_size=1,verbose=0)
-			
-        if train_defender and defender_model is not None and len(d_corrected_scores)>0:
-            #print(np.array_repr( d_game_states[-2] ).replace('\n', ''))
-            #print(np.array_repr( d_game_states[-1] ).replace('\n', ''))
-            print( """Last Defender states: {}""".format(' '.join(['{:+0.4f}'.format(entry) for entry in d_corrected_scores[-16:-1]])))
+            # attacker_model.fit(a_game_states.reshape(-1,11*11),a_corrected_scores,epochs=1,batch_size=1,verbose=0)
+            # attacker_model.fit(a_game_states.reshape(-1,11,11,1),a_corrected_scores,epochs=1,batch_size=1,verbose=0)
+            attacker_model.fit(a_game_states.reshape(-1, tafl.DIM * tafl.DIM * 3), a_corrected_scores, epochs=1,
+                               batch_size=1, verbose=0)
+
+        if train_defender and defender_model is not None and len(d_corrected_scores) > 0:
+            # print(np.array_repr( d_game_states[-2] ).replace('\n', ''))
+            # print(np.array_repr( d_game_states[-1] ).replace('\n', ''))
+            print("""Last Defender states: {}""".format(
+                ' '.join(['{:+0.4f}'.format(entry) for entry in d_corrected_scores[-16:-1]])))
             smooth_corrected_scores_exp(d_corrected_scores)
-            print( """            Smoothed: {}""".format(' '.join(['{:+0.4f}'.format(entry) for entry in d_corrected_scores[-15:]])))
-            d_game_states,d_corrected_scores = unison_shuffled_copies(np.array(d_game_states),np.array(d_corrected_scores))
+            print("""            Smoothed: {}""".format(
+                ' '.join(['{:+0.4f}'.format(entry) for entry in d_corrected_scores[-15:]])))
+            d_game_states, d_corrected_scores = unison_shuffled_copies(np.array(d_game_states),
+                                                                       np.array(d_corrected_scores))
             if use_symmetry:
                 d_game_states = expand_game_states_symmetries(d_game_states)
-                d_corrected_scores = np.tile(d_corrected_scores,8)
-            #defender_model.fit(d_game_states.reshape(-1,11*11),d_corrected_scores,epochs=1,batch_size=1,verbose=0)
-            #defender_model.fit(d_game_states.reshape(-1,11,11,1),d_corrected_scores,epochs=1,batch_size=1,verbose=0)
-            defender_model.fit(d_game_states.reshape(-1,tafl.DIM*tafl.DIM*3),d_corrected_scores,epochs=1,batch_size=1,verbose=0)
+                d_corrected_scores = np.tile(d_corrected_scores, 8)
+            # defender_model.fit(d_game_states.reshape(-1,11*11),d_corrected_scores,epochs=1,batch_size=1,verbose=0)
+            # defender_model.fit(d_game_states.reshape(-1,11,11,1),d_corrected_scores,epochs=1,batch_size=1,verbose=0)
+            defender_model.fit(d_game_states.reshape(-1, tafl.DIM * tafl.DIM * 3), d_corrected_scores, epochs=1,
+                               batch_size=1, verbose=0)
 
-        if(stats.num_games_total()%cache_model_every==0):  # Save every cache_model_every games
-            #print('--- num games played: {}'.format(stats.num_games_total()))
-            if num_train_games_attacker>0: attacker_model.save('{}/attacker_model_{}_games.h5'.format(save_dir,num_train_games_attacker))
-            if num_train_games_defender>0: defender_model.save('{}/defender_model_{}_games.h5'.format(save_dir,num_train_games_defender))
-            if train_attacker or train_defender: pickle.dump(stats, open( '{}/StatsTracker_{}_games.pkl'.format(save_dir,stats.num_games_total()), 'wb' ))
+        if (stats.num_games_total() % cache_model_every == 0):  # Save every cache_model_every games
+            # print('--- num games played: {}'.format(stats.num_games_total()))
+            if num_train_games_attacker > 0: attacker_model.save(
+                '{}/attacker_model_{}_games.h5'.format(save_dir, num_train_games_attacker))
+            if num_train_games_defender > 0: defender_model.save(
+                '{}/defender_model_{}_games.h5'.format(save_dir, num_train_games_defender))
+            if train_attacker or train_defender: pickle.dump(stats, open(
+                '{}/StatsTracker_{}_games.pkl'.format(save_dir, stats.num_games_total()), 'wb'))
 
         if interactive:
             time.sleep(2)
-        if max(num_train_games_attacker,num_train_games_defender) >= 1000000: play = False # Hardcoded cutoff just to make sure things don't go too crazy.
+        if max(num_train_games_attacker,
+               num_train_games_defender) >= 1000000: play = False  # Hardcoded cutoff just to make sure things don't go too crazy.
 
         tafl.cleanup()
 
