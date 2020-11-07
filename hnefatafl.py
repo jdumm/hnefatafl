@@ -119,7 +119,7 @@ class Move(object):
     def king_escaped(self, Kings):
         """Check if king has moved onto a non-central special square or all Attackers removed"""
         king = (Kings.sprites()[0].x_tile, Kings.sprites()[0].y_tile)
-        if king in SPECIALSQS.difference([((DIM - 1) // 2, (DIM - 1) // 2)]) or Attackers.len() == 0:
+        if king in SPECIALSQS.difference([((DIM - 1) // 2, (DIM - 1) // 2)]):
             self.escaped = True
             self.game_over = True
 
@@ -141,10 +141,10 @@ class Move(object):
             g2 (Group(sprites)): the current player's pieces
             Kings (Group(sprites)): the group containing the king
         """
-        check_pts = {[((self.row, self.col + 1), (self.row, self.col + 2)),
+        check_pts = {((self.row, self.col + 1), (self.row, self.col + 2)),
                          ((self.row + 1, self.col), (self.row + 2, self.col)),
                          ((self.row, self.col - 1), (self.row, self.col - 2)),
-                         ((self.row - 1, self.col), (self.row - 2, self.col))]}
+                         ((self.row - 1, self.col), (self.row - 2, self.col))}
         captured = []
         king = (Kings.sprites()[0].x_tile, Kings.sprites()[0].y_tile)
         for square in check_pts:
@@ -181,6 +181,9 @@ class Move(object):
                 RemovedPieces.add(p)
             if p in Attackers:
                 RemovedAttackers.add(p)
+                if len(Attackers) <= 1:  # Last Attacker is being removed
+                    self.escaped = True
+                    self.game_over = True
             if p in Defenders:
                 RemovedDefenders.add(p)
             if p in Kings:
@@ -477,8 +480,8 @@ class Board(object):
                          ".....a.....",
                          "x..aaaaa..x"]
 
-        SPECIALSQS = set([(len(self.grid) // 2, len(self.grid) // 2), (0, 0), (0, len(self.grid) - 1),
-                          (len(self.grid) - 1, len(self.grid) - 1), (len(self.grid) - 1, 0)])
+        SPECIALSQS = {(len(self.grid) // 2, len(self.grid) // 2), (0, 0), (0, len(self.grid) - 1),
+                          (len(self.grid) - 1, len(self.grid) - 1), (len(self.grid) - 1, 0)}
 
         self.colors = {'x': (25, 25, 25),
                        'a': (186, 169, 85),
@@ -487,11 +490,11 @@ class Board(object):
                        '.': (250, 236, 163)}
 
         if game_name == 'tablut':  # Special case overrides
-            SPECIALSQS = set([(len(self.grid) // 2, len(self.grid) // 2), (0, 3), (0, 4), (0, 5),
+            SPECIALSQS = {(len(self.grid) // 2, len(self.grid) // 2), (0, 3), (0, 4), (0, 5),
                               (3, 0), (4, 0), (5, 0),
                               (3, 8), (4, 8), (5, 8),
                               (8, 3), (8, 4), (8, 5),
-                              (4, 1), (4, 7), (1, 4), (7, 4)])
+                              (4, 1), (4, 7), (1, 4), (7, 4)}
             self.colors['a'] = self.colors['x']
         if game_name == 'simple':  # Special case overrides
             SPECIALSQS = set([(len(self.grid) // 2, len(self.grid) // 2), (0, 0)])
@@ -520,6 +523,7 @@ class Piece(pygame.sprite.Sprite):
             y (int): the column that the piece will be placed.
         """
         pygame.sprite.Sprite.__init__(self, self.groups)
+        self.color = None
         self.base_color = None
         self.special_sqs = False
         self.pos_cent(x, y)
@@ -684,10 +688,10 @@ def update_image(screen, board, move, text, text2):
 
     """Write which player's turn it is on the bottom of the window."""
     font = pygame.font.Font(None, 36)
-    msg = font.render(text, 1, (1, 0, 0))
+    msg = font.render(text, True, (1, 0, 0))
     msgpos = msg.get_rect()
     if text2:
-        msg2 = font.render(text2, 1, (0, 1, 0))
+        msg2 = font.render(text2, True, (0, 1, 0))
         msgpos2 = msg2.get_rect()
         msgpos.centerx = screen.get_rect().centerx
         msgpos.centery = ((HEIGHT - WIDTH) / 7) + WIDTH
@@ -777,6 +781,7 @@ def run_game(screen, game_name='hnefatafl'):
                         Current.empty()
 
         """Text to display on bottom of game."""
+        text = None
         text2 = None
         if move.a_turn:
             text = "Attacker's Turn"
