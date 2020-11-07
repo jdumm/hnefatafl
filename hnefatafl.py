@@ -9,6 +9,7 @@ Date: 7/13/2015
 """
 
 import sys
+import random
 import pygame
 from pygame.locals import *
 
@@ -189,6 +190,16 @@ class Move(object):
             if p in Kings:
                 RemovedKings.add(p)
             p.remove(Pieces, Attackers, Defenders, Kings)
+
+    def remove_random_pieces(self, g, frac=0.50):
+        """Remove a random fraction of the pieces from one side.  Useful for auto-balancing.
+        g: (Group(sprites)): the pieces to select from for removal (Attackers or Defenders but not the King)
+        frac: fraction of pieces to remove on average, 0 to 1.  In practice, every piece has an equal chance
+              to be removed.
+        """
+        for p in g:
+            if random.random() < frac and p not in Kings:
+                p.remove(Pieces, Attackers, Defenders, Kings)
 
     def kill_king(self, x, y, attackers, test_x=None, test_y=None):
         """Determine if the king has been killed.
@@ -408,6 +419,14 @@ class Board(object):
                          "aadcdaa",
                          "...d...",
                          "...a...",
+                         "x..a..x"]
+        elif game_name == 'brandubh_simple':
+            self.grid = ["x.....x",
+                         "...a...",
+                         "...d...",
+                         ".adcda.",
+                         "...d...",
+                         ".......",
                          "x..a..x"]
         elif game_name == 'simple':
             self.grid = ["xd...",
