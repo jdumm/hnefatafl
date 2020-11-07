@@ -1005,9 +1005,7 @@ def main(game_name, human_attacker, human_defender, interactive, train_attacker,
                                                                        np.array(a_corrected_scores))
             if use_symmetry:
                 a_game_states = expand_game_states_symmetries(a_game_states)
-                print(f"a_game_states shape: {a_game_states.shape}")
                 a_corrected_scores = np.tile(a_corrected_scores, 8)
-                print(f"a_corrected_scores shape: {a_corrected_scores.shape}")
             # attacker_model.fit(a_game_states.reshape(-1,11*11),a_corrected_scores,epochs=1,batch_size=1,verbose=0)
             # attacker_model.fit(a_game_states.reshape(-1,11,11,1),a_corrected_scores,epochs=1,batch_size=1,verbose=0)
             attacker_model.fit(a_game_states.reshape(-1, tafl.DIM * tafl.DIM * 3), a_corrected_scores, epochs=1,
