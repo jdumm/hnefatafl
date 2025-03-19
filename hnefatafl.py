@@ -429,12 +429,12 @@ class Board(object):
                          ".......",
                          "x..a..x"]
         elif game_name == 'simple':
-            self.grid = ["xd...",
-                         "d....",
+            self.grid = ["xa...",
+                         "a....",
                          "..c..",
                          ".....",
                          "....."]
-        elif game_name == 'ard ri' or game_name == 'ardri' or game_name == 'ard_ri':
+        elif game_name in ['ard ri', 'ardri' 'ard_ri']:
             self.grid = ["x.aaa.x",
                          "...a...",
                          "a.ddd.a",
@@ -464,7 +464,7 @@ class Board(object):
                          ".....a.....",
                          "....a.a....",
                          "x...aaa...x"]
-        elif game_name == 'alea evangelii' or game_name == 'aleaevangelii' or game_name == 'alea_evangelii':
+        elif game_name in ['alea evangelii', 'aleaevangelii', 'alea_evangelii']:
             self.grid = ["x.a..a.......a..a.x",
                          "...................",
                          "a....a.......a....a",
@@ -485,7 +485,8 @@ class Board(object):
                          "...................",
                          "x.a..a.......a..a.x"]
         else:
-            if game_name != 'hnefatafl': print(
+            if game_name != 'hnefatafl':
+                print(
                 "WARN: Game name {} not recognized.  Defaulting to Hnefatafl!".format(game_name))
             self.grid = ["x..aaaaa..x",
                          ".....a.....",
@@ -745,6 +746,7 @@ def run_game(screen, game_name='hnefatafl'):
 
     Args:
         screen (pygame.Surface): The game window
+        game_name: Variant game name for different size boards and layouts.
 
     Returns:
         True if players want a new game, False o.w.
@@ -818,12 +820,12 @@ def run_game(screen, game_name='hnefatafl'):
 
 
 def cleanup():
-    """Empty out all groups of sprites.
-
-    Note:
-        Although this works for now, I don't think that it properly deletes
-        all of the sprites. Must fix this.
-    """
+    """Empty out all groups of sprites and properly delete sprite objects."""
+    # First remove all sprites from their groups
+    for sprite in Pieces:
+        sprite.kill()
+    
+    # Then empty the groups
     Current.empty()
     Kings.empty()
     Defenders.empty()
