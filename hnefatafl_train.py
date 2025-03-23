@@ -24,9 +24,10 @@ import itertools
 import pickle
 from collections import deque
 from copy import deepcopy
-from tensorflow.keras import Sequential
-from tensorflow.keras.layers import Dense, Activation, Dropout, Conv2D, Flatten, MaxPooling2D
-from tensorflow.keras.optimizers import SGD
+from tensorflow import keras
+from tensorflow.keras import Sequential, Model, Input
+from tensorflow.keras.layers import Dense, Activation, Dropout, Conv2D, Flatten, MaxPooling2D, BatchNormalization, Add, Concatenate
+from tensorflow.keras.optimizers import SGD, Adam
 from tensorflow.keras.models import load_model
 from tensorflow.keras.initializers import TruncatedNormal
 
@@ -304,29 +305,30 @@ def run_game(attacker_model=None, defender_model=None, human_attacker=False, hum
             text = "--- King escaped! Defenders win!"
             print(text)
             text2 = "Play again? y/n"
-            a_predicted_scores.append(-1.0)
-            d_predicted_scores.append(+1.0)
+            # Scale reward based on number of moves - faster wins get higher rewards
+            move_scale = max(0.5, 2.0 - (num_moves / 20))  # Starts at 2.0 reward, decreases to 0.5 minimum
+            a_predicted_scores.append(-1.0 * move_scale)  # Attacker loses more for quick losses
+            d_predicted_scores.append(+1.0 * move_scale)  # Defender gets bonus for quick wins
             if screen:
                 tafl.update_image(screen, board, move, text, text2)
                 pygame.display.flip()
             if human_attacker or human_defender: play = end_game_loop(move)
-            return play, a_game_states, a_predicted_scores[1:], d_game_states, d_predicted_scores[
-                                                                               1:]  # i.e. the corrected scores from RL
+            return play, a_game_states, a_predicted_scores[1:], d_game_states, d_predicted_scores[1:]
         if move.king_killed:
             text = "--- King killed! Attackers win!"
             print(text)
             text2 = "Play again? y/n"
-            a_predicted_scores.append(+1.0)
-            d_predicted_scores.append(-1.0)
+            # Scale reward based on number of moves - faster wins get higher rewards
+            move_scale = max(0.5, 2.0 - (num_moves / 20))  # Starts at 2.0 reward, decreases to 0.5 minimum
+            a_predicted_scores.append(+1.0 * move_scale)  # Attacker gets bonus for quick wins
+            d_predicted_scores.append(-1.0 * move_scale)  # Defender loses more for quick losses
             if screen:
                 tafl.update_image(screen, board, move, text, text2)
                 pygame.display.flip()
             if human_attacker or human_defender: play = end_game_loop(move)
-            return play, a_game_states, a_predicted_scores[1:], d_game_states, d_predicted_scores[
-                                                                               1:]  # i.e. the corrected scores from RL
+            return play, a_game_states, a_predicted_scores[1:], d_game_states, d_predicted_scores[1:]
         if move.restart:
-            return play, a_game_states, a_predicted_scores[1:], d_game_states, d_predicted_scores[
-                                                                               1:]  # i.e. the corrected scores from RL
+            return play, a_game_states, a_predicted_scores[1:], d_game_states, d_predicted_scores[1:]
 
 
 def end_game_loop(move):
@@ -422,20 +424,17 @@ def do_human_turn(screen, board, move):
 
 def do_best_move(move, model, game_state_cache, sample_frac=1.0, screen=None, board=None, enable_remove=True):
     """ Function to try all possible moves and select the best according to the model provided.
-
-        Args: 
-              move: tafl game state and valid moves.
-              model: Keras model used for predicting all possible moves.
-              sample_frac: Fraction of pieces AND fraction of their moves to consider, for speed.
-                           Default 1.0 considers all possible pieces and moves.
     """
-
     game_state = game_state_to_3d_array()
     game_state_cache.append(deepcopy(game_state))
 
+    # For simple game, we want to be more focused in our exploration
+    simple_game = (tafl.DIM == 5)
+    if simple_game:
+        sample_frac = 1.0  # Always consider all moves in simple game
+        
     if move.a_turn:
         pieces = tafl.Attackers
-        # TODO: Add logic to see if we can kill the king before skipping pieces!
     else:
         pieces = tafl.Defenders
         # If King can win, do it.
@@ -463,30 +462,25 @@ def do_best_move(move, model, game_state_cache, sample_frac=1.0, screen=None, bo
     best_move = None
     best_game_state = None
     best_vm = None
+    
+    # For simple game, add temperature scaling to encourage exploitation
+    temperature = 0.1 if simple_game else 1.0
+    
     for piece in pieces:
         if random.random() > sample_frac:
             continue
-        if screen and board: time.sleep(1.0)
-        move.select(piece)  # Move class defines all possible valid moves
+        move.select(piece)
         tafl.Current.add(piece)
-        if len(move.vm) == 0:  # No valid moves for this piece, move on
+        if len(move.vm) == 0:
             move.select(piece)
             tafl.Current.empty()
             continue
         else:
-            num_best_so_far = 0
             for m in move.vm:
                 if random.random() > sample_frac:
                     continue
 
                 # Try candidate move
-                if screen and board:
-                    for event in pygame.event.get():
-                        if event.type == QUIT:
-                            sys.exit()
-                    tafl.update_image(screen, board, move, "DEBUG MODE", "Score: {:0.4f}".format(0))
-                    pygame.display.flip()
-                    time.sleep(1.0)
                 move.is_valid_move(m, tafl.Current.sprites()[0], True)
                 if enable_remove:
                     if move.a_turn:
@@ -494,30 +488,26 @@ def do_best_move(move, model, game_state_cache, sample_frac=1.0, screen=None, bo
                     else:
                         move.remove_pieces(tafl.Attackers, tafl.Defenders, tafl.Kings, king_is_special)
                 game_state = game_state_to_3d_array()
+                
                 if move.a_turn and move.king_killed:  # Move would kill king, do it.
                     best_score = 1.0
                     best_piece = piece
                     best_move = m
                     best_vm = move.vm
-                # score = model.predict(game_state.reshape(1, tafl.DIM * tafl.DIM * 3))[0][0]
-                # TODO, can I call predict once on the full set of moves?  At least per piece.
-                score = model.predict(game_state.reshape(1, tafl.DIM, tafl.DIM, 3))[0][0]
-                if screen and board:
-                    for event in pygame.event.get():
-                        if event.type == QUIT:
-                            sys.exit()
-                    tafl.update_image(screen, board, move, "DEBUG MODE", "Score: {:0.4f}".format(score))
-                    pygame.display.flip()
-                    time.sleep(0.5)
-
-                # Reverse candidate move to log the piece location correctly
-                # print("len pieces1", len(tafl.Pieces))
+                    
+                # Get model prediction and apply temperature scaling for simple game
+                score = model.predict(game_state.reshape(1, tafl.DIM, tafl.DIM, 3), verbose=0)[0][0]
+                if simple_game:
+                    score = score / temperature  # Scale logits by temperature
+                
+                # Reverse candidate move
                 move.undo(tafl.Current.sprites()[0])
-                # print("len pieces2", len(tafl.Pieces))
 
-                if score == best_score: score = score + random.uniform(-0.01,
-                                                                       0.01)  # Add a little noise if they are exactly equal
-                # Find best score but don't let it keep repeating the same states
+                # Add small random noise to break ties
+                if score == best_score:
+                    score = score + random.uniform(-0.01, 0.01)
+                    
+                # Check for move repetition
                 if score > best_score and not next(
                         (True for elem in itertools.islice(game_state_cache, 4, game_state_cache.maxlen) if
                          np.array_equal(elem, game_state)), False):
@@ -525,17 +515,14 @@ def do_best_move(move, model, game_state_cache, sample_frac=1.0, screen=None, bo
                     best_piece = piece
                     best_move = m
                     best_vm = move.vm
-                    # print("best stats: ",best_score,best_piece,(best_piece.x_tile,best_piece.y_tile),best_move)
-                    # print("Valid moves: ",move.vm)
 
-        move.select(piece)  # Deselect
+        move.select(piece)
         tafl.Current.empty()
 
     if best_piece is None or best_move is None:
         print("NO BEST MOVE! No moves at all or a Draw?")
         return game_state, 0.0
 
-    # print(" ",best_score)
     move.select(best_piece)
     tafl.Current.add(best_piece)
 
@@ -557,7 +544,6 @@ def do_best_move(move, model, game_state_cache, sample_frac=1.0, screen=None, bo
         move.end_turn(tafl.Current.sprites()[0])
         tafl.Current.empty()
 
-        # print(game_state,best_score)
         return game_state, best_score
     else:
         print("ERROR: Best move logic failed... Fix! Debugging info follows:")
@@ -570,169 +556,75 @@ def do_best_move(move, model, game_state_cache, sample_frac=1.0, screen=None, bo
         sys.exit(1)
 
 
-def initialize_random_nn_model():
-    """ Initialize Keras Deep Neural Networks models and print summary.
+def initialize_random_cnn_model_3d_sonnet():
+    """ Initialize Keras CNN model optimized for 7x7 board game learning.
+    
+    Architecture features:
+    - Multiple channels to represent different piece types and board positions (3 channels: attacker, king, defender)
+    - Residual connections to help learn complex spatial relationships
+    - Multiple convolutional layers with different kernel sizes to capture both local and broader patterns
+    - Batch normalization for stable training
+    - Dropout for regularization
     """
-    print("Initializing randomized NN model")
-    model = Sequential()
-    model.add(
-        Dense(2 * tafl.DIM * tafl.DIM, input_dim=tafl.DIM * tafl.DIM, kernel_initializer='normal', activation='relu'))
-    model.add(Dropout(0.1))
-    model.add(Dense(tafl.DIM * tafl.DIM, kernel_initializer='normal', activation='relu'))
-    model.add(Dropout(0.1))
-    # Adding more test layers
-
-    model.add(Dense(20, kernel_initializer='normal', activation='relu'))
-    model.add(Dropout(0.1))
-    model.add(Dense(5, kernel_initializer='normal', activation='relu'))
-
-    model.add(Dense(1, kernel_initializer='normal'))
-
-    learning_rate = 0.05
-    momentum = 0.8
-
-    sgd = SGD(lr=learning_rate, momentum=momentum, nesterov=False)
-    model.compile(loss='mean_squared_error', optimizer=sgd)
-    model.summary()
-    return model
-
-
-def initialize_random_nn_model_v2():
-    """ Initialize Keras Deep Neural Networks models and print summary.
-    """
-    print("Initializing randomized CNN model")
-    std = 0.05
-    model = Sequential()
-    model.add(Conv2D(32, (3, 3), input_shape=(11, 11, 1), padding='same', activation='relu', strides=(1, 1),
-                     kernel_initializer=TruncatedNormal(mean=0.0, stddev=std, seed=None)))
-    # model.add(Conv2D( 64, (3,3), padding='same',activation='relu', strides=(1,1), kernel_initializer=TruncatedNormal(mean=0.0, stddev=std, seed=None)))
-    # model.add(Conv2D(128, (3,3), padding='same',activation='relu', strides=(2,2), kernel_initializer=TruncatedNormal(mean=0.0, stddev=std, seed=None)))
-    # model.add(Dropout(0.1))
-    # model.add(Conv2D(64, (3,3), activation='relu',kernel_initializer=TruncatedNormal(mean=0.0, stddev=std, seed=None)))
-    model.add(Flatten())
-    # model.add(Dropout(0.1))
-    # Adding more test layers
-
-    model.add(Dense(64, activation='relu', kernel_initializer=TruncatedNormal(mean=0.0, stddev=std, seed=None)))
-    model.add(Dropout(0.01))
-    model.add(Dense(32, activation='relu', kernel_initializer=TruncatedNormal(mean=0.0, stddev=std, seed=None)))
-    model.add(Dense(16, activation='relu', kernel_initializer=TruncatedNormal(mean=0.0, stddev=std, seed=None)))
-
-    model.add(Dense(1, kernel_initializer=TruncatedNormal(mean=0.0, stddev=std, seed=None)))
-
-    learning_rate = 0.001
-    momentum = 0.8
-
-    sgd = SGD(lr=learning_rate, momentum=momentum, nesterov=False)
-    model.compile(loss='mean_squared_error', optimizer=sgd)
-    model.summary()
-    return model
-
-
-def initialize_random_nn_model_3d():
-    """ Initialize Keras Deep Neural Networks models and print summary.
-        Architecture for the 3d game states.
-    """
-    print("Initializing randomized NN model")
-    model = Sequential()
-    model.add(Dense(2 * tafl.DIM * tafl.DIM * 3, input_dim=tafl.DIM * tafl.DIM * 3, kernel_initializer='normal',
-                    activation='relu'))
-    model.add(Dropout(0.01))
-    model.add(Dense(tafl.DIM * tafl.DIM * 3, kernel_initializer='normal', activation='relu'))
-    model.add(Dropout(0.01))
-    # Adding more test layers
-
-    model.add(Dense(tafl.DIM * 3, kernel_initializer='normal', activation='relu'))
-    model.add(Dropout(0.01))
-    model.add(Dense(tafl.DIM // 2, kernel_initializer='normal', activation='relu'))
-
-    model.add(Dense(1, kernel_initializer='normal'))
-
-    learning_rate = 0.005
-    momentum = 0.8
-
-    sgd = SGD(lr=learning_rate, momentum=momentum, nesterov=False)
-    model.compile(loss='mean_squared_error', optimizer=sgd)
-    model.summary()
-    return model
-
-
-def initialize_random_nn_model_3d_dense_v2():
-    """ Initialize Keras Deep Neural Networks models and print summary.
-        Architecture for the 3d game states.
-    """
-    print("Initializing randomized NN model")
-    model = Sequential()
-    model.add(Dense(tafl.DIM * tafl.DIM * 3, input_dim=tafl.DIM * tafl.DIM * 3, kernel_initializer='normal',
-                    activation='relu'))
-    model.add(Dropout(0.1))
-    model.add(Dense(tafl.DIM * 3, kernel_initializer='normal', activation='relu'))
-    model.add(Dropout(0.1))
-    model.add(Dense(1, kernel_initializer='normal'))
-
-    learning_rate = 0.001
-    momentum = 0.9
-
-    sgd = SGD(lr=learning_rate, momentum=momentum, nesterov=False)
-    model.compile(loss='mean_squared_error', optimizer=sgd)
-    model.summary()
-    return model
-
-
-def initialize_random_nn_model_3d_dense_v3():
-    """ Initialize Keras Deep Neural Networks models and print summary.
-        Architecture for the 3d game states, boxy layout.
-    """
-    print("Initializing randomized NN model")
-    model = Sequential()
-    model.add(Dense(tafl.DIM * tafl.DIM * 3, input_dim=tafl.DIM * tafl.DIM * 3, kernel_initializer='normal',
-                    activation='relu'))
-    model.add(Dropout(0.05))
-    model.add(Dense(tafl.DIM * tafl.DIM * 3, kernel_initializer='normal', activation='relu'))
-    model.add(Dropout(0.05))
-    model.add(Dense(tafl.DIM * tafl.DIM * 3, kernel_initializer='normal', activation='relu'))
-    model.add(Dropout(0.05))
-    model.add(Dense(tafl.DIM * tafl.DIM * 3, kernel_initializer='normal', activation='relu'))
-
-    model.add(Dense(1, kernel_initializer='normal'))
-
-    learning_rate = 0.010
-    momentum = 0.8
-
-    sgd = SGD(lr=learning_rate, momentum=momentum, nesterov=False)
-    model.compile(loss='mean_squared_error', optimizer=sgd)
-    model.summary()
-    return model
-
-
-def initialize_random_cnn_model_3d_v1():
-    """ Initialize Keras CNN with fully connected layers and print summary.
-        Architecture for the 3d games states.
-    """
-    print("Initializing randomized CNN model 3d game states v1")
-    print((3, tafl.DIM, tafl.DIM))
-    model = Sequential()
-    model.add(
-        Conv2D(32,
-               (3, 3),
-               input_shape=(tafl.DIM, tafl.DIM, 3),
-               padding='same',
-               activation='relu',
-               strides=(1, 1),
-               )
-    )
-    # model.add(MaxPooling2D(pool_size=(2, 2)))
-    model.add(Flatten())
-    model.add(Dense(2 * tafl.DIM * tafl.DIM, activation='relu'))
-    model.add(Dropout(0.2))
-    model.add(Dense(1, activation='sigmoid'))
-
-    #learning_rate = 0.001
-    learning_rate = 0.1
-    momentum = 0.8
-
-    sgd = SGD(lr=learning_rate, momentum=momentum, nesterov=False)
-    model.compile(loss='mean_squared_error', optimizer=sgd)
+    print("Initializing CNN model v2 for board game learning")
+    
+    input_shape = (tafl.DIM, tafl.DIM, 3)  # 3 channels: attacker, king, defender
+    std = 0.02  # Smaller std for better initial training stability
+    
+    inputs = Input(shape=input_shape)
+    
+    # Initial convolution block
+    x = Conv2D(64, (3, 3), padding='same', activation='relu',
+               kernel_initializer=TruncatedNormal(mean=0.0, stddev=std))(inputs)
+    x = BatchNormalization()(x)
+    
+    # First residual block
+    res = x
+    x = Conv2D(64, (3, 3), padding='same', activation='relu',
+               kernel_initializer=TruncatedNormal(mean=0.0, stddev=std))(x)
+    x = BatchNormalization()(x)
+    x = Conv2D(64, (3, 3), padding='same',
+               kernel_initializer=TruncatedNormal(mean=0.0, stddev=std))(x)
+    x = BatchNormalization()(x)
+    x = Add()([x, res])
+    x = Activation('relu')(x)
+    
+    # Pattern recognition block - different kernel sizes
+    # 5x5 for broader patterns like surrounding threats
+    branch1 = Conv2D(32, (5, 5), padding='same', activation='relu',
+                     kernel_initializer=TruncatedNormal(mean=0.0, stddev=std))(x)
+    # 3x3 for local patterns
+    branch2 = Conv2D(32, (3, 3), padding='same', activation='relu',
+                     kernel_initializer=TruncatedNormal(mean=0.0, stddev=std))(x)
+    # 1x1 for point-wise patterns
+    branch3 = Conv2D(32, (1, 1), padding='same', activation='relu',
+                     kernel_initializer=TruncatedNormal(mean=0.0, stddev=std))(x)
+    
+    x = Concatenate()([branch1, branch2, branch3])
+    x = BatchNormalization()(x)
+    x = Dropout(0.2)(x)
+    
+    # Final convolution to reduce channels
+    x = Conv2D(32, (3, 3), padding='same', activation='relu',
+               kernel_initializer=TruncatedNormal(mean=0.0, stddev=std))(x)
+    x = BatchNormalization()(x)
+    
+    # Flatten and dense layers
+    x = Flatten()(x)
+    x = Dense(256, activation='relu',
+              kernel_initializer=TruncatedNormal(mean=0.0, stddev=std))(x)
+    x = BatchNormalization()(x)
+    x = Dropout(0.3)(x)
+    x = Dense(128, activation='relu',
+              kernel_initializer=TruncatedNormal(mean=0.0, stddev=std))(x)
+    x = BatchNormalization()(x)
+    x = Dense(1, kernel_initializer=TruncatedNormal(mean=0.0, stddev=std))(x)
+    
+    model = Model(inputs=inputs, outputs=x)
+    
+    optimizer = Adam(learning_rate=0.01)  # Increased from 0.001 to 0.1 for faster learning
+    model.compile(optimizer=optimizer, loss='mean_squared_error')
+    
     model.summary()
     return model
 
@@ -842,13 +734,62 @@ def smooth_corrected_scores(corrected_scores, num_to_smooth=50):
 
 def smooth_corrected_scores_exp(corrected_scores, dynamic=True, decay_constant=5.):
     """ Smooth out the lead up to the final state for faster learning.
-        Exponential strategy.  dynamic mode = True means exp weight scales with game length.
-        False means the decay_constant in terms of num game states is used.  
+        Add intermediate rewards based on game state advantages and spatial understanding.
+        Especially tuned for the simple game mode to understand positioning.
     """
-    if dynamic: decay_constant = float(len(corrected_scores)) / 2.  # 1/2 game length
-    for i in range(len(corrected_scores) // 2 - 1):
-        corrected_scores[-1 * (i + 2)] = (corrected_scores[-1 * (i + 2)] + math.exp(-i / decay_constant) *
-                                          corrected_scores[-1 * (i + 1)]) / (1. + math.exp(-i / decay_constant))
+    if dynamic: 
+        decay_constant = float(len(corrected_scores)) / 2.  # 1/2 game length
+    
+    # Get final outcome for proper reward shaping
+    final_outcome = corrected_scores[-1]
+    final_magnitude = abs(final_outcome)  # Preserve the magnitude of win/loss
+    
+    # For simple game mode, add strong positional rewards
+    if tafl.DIM == 5:  # Simple game mode
+        king_pos = None
+        attacker_pos = None
+        for p in tafl.Kings:
+            king_pos = (p.x_tile, p.y_tile)
+        for p in tafl.Attackers:
+            attacker_pos = (p.x_tile, p.y_tile)
+            
+        if king_pos and attacker_pos:
+            # Calculate distance to nearest corner
+            corners = [(0,0), (0,4), (4,0), (4,4)]
+            min_corner_dist = min(abs(king_pos[0] - c[0]) + abs(king_pos[1] - c[1]) for c in corners)
+            
+            # Calculate if attacker is between king and nearest corner
+            blocking_bonus = 0
+            for corner in corners:
+                if (min(king_pos[0], corner[0]) <= attacker_pos[0] <= max(king_pos[0], corner[0]) and
+                    min(king_pos[1], corner[1]) <= attacker_pos[1] <= max(king_pos[1], corner[1])):
+                    blocking_bonus = 0.3
+                    break
+    
+    # Shape rewards to encourage progress toward goal
+    for i in range(len(corrected_scores) - 1):
+        # Blend between immediate state value and final outcome
+        position = len(corrected_scores) - i - 1
+        alpha = math.exp(-position / decay_constant)
+        
+        # Add positional rewards for simple game
+        if tafl.DIM == 5:
+            if final_outcome > 0:  # Attacker won
+                corrected_scores[i] += blocking_bonus
+            else:  # Defender won
+                if min_corner_dist < 3:  # Reward being closer to corners
+                    corrected_scores[i] += (3 - min_corner_dist) * 0.2
+        
+        # Add small positive reward for maintaining advantage, scaled by final magnitude
+        if final_outcome > 0 and corrected_scores[i] > 0:
+            advantage_reward = 0.1 * final_magnitude
+        elif final_outcome < 0 and corrected_scores[i] < 0:
+            advantage_reward = 0.1 * final_magnitude
+        else:
+            advantage_reward = 0
+            
+        # Scale intermediate rewards by final magnitude
+        corrected_scores[i] = (corrected_scores[i] + alpha * final_outcome + advantage_reward) / (1. + alpha)
 
 
 @click.command()
@@ -934,7 +875,7 @@ def main(game_name, human_attacker, human_defender, interactive, train_attacker,
             else:
                 attacker_load = 0
         if attacker_load == 0:
-            attacker_model = initialize_random_cnn_model_3d_v1()
+            attacker_model = initialize_random_cnn_model_3d_sonnet()
         else:
             attacker_model = load_model('{}/attacker_model_{}_games.h5'.format(save_dir, attacker_load))
             num_train_games_attacker = attacker_load
@@ -950,7 +891,7 @@ def main(game_name, human_attacker, human_defender, interactive, train_attacker,
         if defender_load == -1:
             defender_model = None  # Defaults to mostly random + some extra King movements
         elif defender_load == 0:
-            defender_model = initialize_random_cnn_model_3d_v1()
+            defender_model = initialize_random_cnn_model_3d_sonnet()
         else:
             defender_model = load_model('{}/defender_model_{}_games.h5'.format(save_dir, defender_load))
             num_train_games_defender = defender_load
@@ -1044,12 +985,11 @@ def main(game_name, human_attacker, human_defender, interactive, train_attacker,
             if use_symmetry:
                 a_game_states = expand_game_states_symmetries(a_game_states)
                 a_corrected_scores = np.tile(a_corrected_scores, 8)
-            # attacker_model.fit(a_game_states.reshape(-1,11*11),a_corrected_scores,epochs=1,batch_size=1,verbose=0)
-            # attacker_model.fit(a_game_states.reshape(-1,11,11,1),a_corrected_scores,epochs=1,batch_size=1,verbose=0)
-            attacker_model.fit(a_game_states.reshape(-1, tafl.DIM, tafl.DIM, 3), #.reshape(-1, tafl.DIM * tafl.DIM * 3),
+            # Modify training parameters for better learning
+            attacker_model.fit(a_game_states.reshape(-1, tafl.DIM, tafl.DIM, 3),
                                a_corrected_scores,
-                               epochs=1,
-                               batch_size=1,
+                               epochs=5,  # Train multiple epochs to reinforce patterns
+                               batch_size=32,  # Use larger batch size for more stable updates
                                verbose=0)
 
         if train_defender and defender_model is not None and len(d_corrected_scores) > 0:
@@ -1069,11 +1009,11 @@ def main(game_name, human_attacker, human_defender, interactive, train_attacker,
                 d_corrected_scores = np.tile(d_corrected_scores, 8)
             # defender_model.fit(d_game_states.reshape(-1,11*11),d_corrected_scores,epochs=1,batch_size=1,verbose=0)
             # defender_model.fit(d_game_states.reshape(-1,11,11,1),d_corrected_scores,epochs=1,batch_size=1,verbose=0)
-            defender_model.fit(d_game_states.reshape(-1, tafl.DIM, tafl.DIM, 3), #.reshape(-1, tafl.DIM * tafl.DIM * 3),
+            defender_model.fit(d_game_states.reshape(-1, tafl.DIM, tafl.DIM, 3),
                                d_corrected_scores,
-                               epochs=1,
-                               batch_size=1,
-                               verbose=0,)
+                               epochs=5,  # Train multiple epochs to reinforce patterns
+                               batch_size=32,  # Use larger batch size for more stable updates
+                               verbose=0)
 
         if (stats.num_games_total() % cache_model_every == 0):  # Save every cache_model_every games
             # print('--- num games played: {}'.format(stats.num_games_total()))

@@ -682,7 +682,7 @@ def initialize_pieces(board):
                 King(x, y)
 
 
-def update_image(screen, board, move, text, text2):
+def update_image(screen, board, move, text, text2, highlight_pos=None, highlight_score=None):
     """Update the image that the users see.
 
     Note:
@@ -693,6 +693,8 @@ def update_image(screen, board, move, text, text2):
         screen (pygame.Surface): game window that the user interacts with
         board (Board): the board that the pieces are on
         move (Move): the move state data
+        highlight_pos: Optional (x,y) position to highlight with a score
+        highlight_score: Optional score to display at the highlighted position
     """
     screen.fill(MARGIN_COLOR)
     for y in range(DIM):
@@ -702,6 +704,25 @@ def update_image(screen, board, move, text, text2):
                     GSIZE,
                     GSIZE]
             pygame.draw.rect(screen, board.colors[board.grid[x][y]], xywh)
+            
+            # If this is the position to highlight
+            if highlight_pos and (x, y) == highlight_pos and highlight_score is not None:
+                # Draw a semi-transparent overlay
+                s = pygame.Surface((GSIZE, GSIZE))
+                s.set_alpha(128)
+                if highlight_score > 0:
+                    s.fill((0, 255, 0))  # Green for positive scores
+                else:
+                    s.fill((255, 0, 0))  # Red for negative scores
+                screen.blit(s, (xywh[0], xywh[1]))
+                
+                # Draw the score
+                small_font = pygame.font.Font(None, 24)
+                score_text = f"{highlight_score:.2f}"
+                score_surf = small_font.render(score_text, True, (0, 0, 0))
+                score_pos = score_surf.get_rect()
+                score_pos.center = (xywh[0] + GSIZE//2, xywh[1] + GSIZE//2)
+                screen.blit(score_surf, score_pos)
 
     for piece in Pieces:
         piece.draw(screen)
