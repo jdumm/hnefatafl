@@ -275,7 +275,8 @@ def run_game(attacker_model=None, defender_model=None, human_attacker=False, hum
                                                            game_state_cache,
                                                            sample_frac=sample_frac,
                                                            enable_remove=True if game_name.lower() != 'simple' else False,
-                                                           )
+                                                           screen=screen,
+                                                           board=board)
                 # game_state,predicted_score = do_best_move(move,attacker_model,game_state_cache,sample_frac=1.00,screen=screen,board=board)
                 a_game_states.append(game_state)
                 a_predicted_scores.append(predicted_score)
@@ -296,7 +297,8 @@ def run_game(attacker_model=None, defender_model=None, human_attacker=False, hum
                                                            game_state_cache,
                                                            sample_frac=sample_frac,
                                                            enable_remove=True if game_name.lower() != 'simple' else False,
-                                                           )
+                                                           screen=screen,
+                                                           board=board)
                 # game_state,predicted_score = do_best_move(move,defender_model,game_state_cache,sample_frac=1.00,screen=screen,board=board)
                 d_game_states.append(game_state)
                 d_predicted_scores.append(predicted_score)
@@ -495,6 +497,18 @@ def do_best_move(move, model, game_state_cache, sample_frac=1.0, screen=None, bo
                     best_move = m
                     best_vm = move.vm
                     
+                    # Display final selected move if in interactive mode
+                    if screen and board:
+                        tafl.update_image(screen, board, move, 
+                                        f"Red: {len(tafl.Attackers.sprites())}", 
+                                        f"Blue: {len(tafl.Defenders.sprites())}",
+                                        highlight_pos=m,  # Highlight the chosen destination
+                                        highlight_score=best_score)  # Show the final score
+                        pygame.display.flip()
+                        time.sleep(0.8)  # Slightly longer pause since this is the only visualization
+                    
+                    return game_state, best_score
+                    
                 # Get model prediction and apply temperature scaling for simple game
                 score = model.predict(game_state.reshape(1, tafl.DIM, tafl.DIM, 3), verbose=0)[0][0]
                 if simple_game:
@@ -544,6 +558,16 @@ def do_best_move(move, model, game_state_cache, sample_frac=1.0, screen=None, bo
         move.end_turn(tafl.Current.sprites()[0])
         tafl.Current.empty()
 
+        # Display final selected move if in interactive mode
+        if screen and board:
+            tafl.update_image(screen, board, move, 
+                            f"Red: {len(tafl.Attackers.sprites())}", 
+                            f"Blue: {len(tafl.Defenders.sprites())}",
+                            highlight_pos=best_move,  # Highlight the chosen destination
+                            highlight_score=best_score)  # Show the final score
+            pygame.display.flip()
+            time.sleep(0.8)  # Slightly longer pause since this is the only visualization
+
         return game_state, best_score
     else:
         print("ERROR: Best move logic failed... Fix! Debugging info follows:")
@@ -569,7 +593,7 @@ def initialize_random_cnn_model_3d_sonnet():
     print("Initializing CNN model v2 for board game learning")
     
     input_shape = (tafl.DIM, tafl.DIM, 3)  # 3 channels: attacker, king, defender
-    std = 0.02  # Smaller std for better initial training stability
+    std = 0.01  # Balanced between exploration (>0.02) and stability (<1.0)
     
     inputs = Input(shape=input_shape)
     

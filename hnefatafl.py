@@ -715,17 +715,25 @@ def update_image(screen, board, move, text, text2, highlight_pos=None, highlight
                 else:
                     s.fill((255, 0, 0))  # Red for negative scores
                 screen.blit(s, (xywh[0], xywh[1]))
-                
-                # Draw the score
-                small_font = pygame.font.Font(None, 24)
-                score_text = f"{highlight_score:.2f}"
-                score_surf = small_font.render(score_text, True, (0, 0, 0))
-                score_pos = score_surf.get_rect()
-                score_pos.center = (xywh[0] + GSIZE//2, xywh[1] + GSIZE//2)
-                screen.blit(score_surf, score_pos)
 
+    # Draw all pieces
     for piece in Pieces:
         piece.draw(screen)
+
+    # Now draw the score text on top of everything
+    if highlight_pos and highlight_score is not None:
+        x, y = highlight_pos
+        xywh = [x * (GSIZE + MARGIN) + MARGIN,
+                y * (GSIZE + MARGIN) + MARGIN,
+                GSIZE,
+                GSIZE]
+        # Draw the score with a larger font and white color for better visibility
+        small_font = pygame.font.Font(None, 28)
+        score_text = f"{highlight_score:.2f}"
+        score_surf = small_font.render(score_text, True, (255, 255, 255))
+        score_pos = score_surf.get_rect()
+        score_pos.center = (xywh[0] + GSIZE//2, xywh[1] + GSIZE//2)
+        screen.blit(score_surf, score_pos)
 
     """Write which player's turn it is on the bottom of the window."""
     font = pygame.font.Font(None, 36)
