@@ -30,6 +30,8 @@ from tensorflow.keras.layers import Dense, Activation, Dropout, Conv2D, Flatten,
 from tensorflow.keras.optimizers import SGD, Adam
 from tensorflow.keras.models import load_model
 from tensorflow.keras.initializers import TruncatedNormal
+import tensorflow as tf
+tf.config.run_functions_eagerly(True)  # Enable eager execution
 
 import hnefatafl as tafl
 from stats_tracker import StatsTracker
@@ -207,7 +209,7 @@ def do_mostly_random_but_strike_to_kill_move(move):
 
 
 def run_game(attacker_model=None, defender_model=None, human_attacker=False, human_defender=False, screen=None,
-             game_name='Hnefatafl', sample_frac=1.0, frac_attackers_to_remove=0, frac_defenders_to_remove=0):
+             game_name='Hnefatafl', sample_frac=1.0, attacker_temp=0.1, defender_temp=0.1, frac_attackers_to_remove=0, frac_defenders_to_remove=0):
     """Start and run one game of computer attacker vs computer defender hnefatafl.
  
        Args:
@@ -250,11 +252,14 @@ def run_game(attacker_model=None, defender_model=None, human_attacker=False, hum
                     sys.exit()
                 if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                     pass
-        if (num_moves >= 100):
+        if num_moves >= 100 or (game_name.lower() == "simple" and num_moves > 4):
             print("--- Draw game after {} moves".format(num_moves))
-            a_predicted_scores.append(0.0)
-            d_predicted_scores.append(0.0)
-            return play, a_game_states, a_predicted_scores[1:], d_game_states, d_predicted_scores[1:]
+            # Replace last predictions with draw values instead of appending
+            if len(a_predicted_scores) > 0:
+                a_predicted_scores[-1] = -0.5  # Slight penalty for draws
+            if len(d_predicted_scores) > 0:
+                d_predicted_scores[-1] = -0.5  # Slight penalty for draws
+            return play, a_game_states, a_predicted_scores, d_game_states, d_predicted_scores
 
         if move.a_turn:
             if game_name.lower() == "simple":
@@ -274,6 +279,7 @@ def run_game(attacker_model=None, defender_model=None, human_attacker=False, hum
                                                            attacker_model,
                                                            game_state_cache,
                                                            sample_frac=sample_frac,
+                                                           temperature=attacker_temp,
                                                            enable_remove=True if game_name.lower() != 'simple' else False,
                                                            screen=screen,
                                                            board=board)
@@ -296,6 +302,7 @@ def run_game(attacker_model=None, defender_model=None, human_attacker=False, hum
                                                            defender_model,
                                                            game_state_cache,
                                                            sample_frac=sample_frac,
+                                                           temperature=defender_temp,
                                                            enable_remove=True if game_name.lower() != 'simple' else False,
                                                            screen=screen,
                                                            board=board)
@@ -308,29 +315,37 @@ def run_game(attacker_model=None, defender_model=None, human_attacker=False, hum
             print(text)
             text2 = "Play again? y/n"
             # Scale reward based on number of moves - faster wins get higher rewards
-            move_scale = max(0.5, 2.0 - (num_moves / 20))  # Starts at 2.0 reward, decreases to 0.5 minimum
-            a_predicted_scores.append(-1.0 * move_scale)  # Attacker loses more for quick losses
-            d_predicted_scores.append(+1.0 * move_scale)  # Defender gets bonus for quick wins
+            
+            # Replace last predictions instead of appending
+            if len(a_predicted_scores) > 0:
+                a_predicted_scores[-1] = -1.0
+            if len(d_predicted_scores) > 0:
+                d_predicted_scores[-1] = +1.0
+                
             if screen:
                 tafl.update_image(screen, board, move, text, text2)
                 pygame.display.flip()
             if human_attacker or human_defender: play = end_game_loop(move)
-            return play, a_game_states, a_predicted_scores[1:], d_game_states, d_predicted_scores[1:]
+            return play, a_game_states, a_predicted_scores, d_game_states, d_predicted_scores
         if move.king_killed:
             text = "--- King killed! Attackers win!"
             print(text)
             text2 = "Play again? y/n"
             # Scale reward based on number of moves - faster wins get higher rewards
-            move_scale = max(0.5, 2.0 - (num_moves / 20))  # Starts at 2.0 reward, decreases to 0.5 minimum
-            a_predicted_scores.append(+1.0 * move_scale)  # Attacker gets bonus for quick wins
-            d_predicted_scores.append(-1.0 * move_scale)  # Defender loses more for quick losses
+            
+            # Replace last predictions instead of appending
+            if len(a_predicted_scores) > 0:
+                a_predicted_scores[-1] = +1.0 
+            if len(d_predicted_scores) > 0:
+                d_predicted_scores[-1] = -1.0
+                
             if screen:
                 tafl.update_image(screen, board, move, text, text2)
                 pygame.display.flip()
             if human_attacker or human_defender: play = end_game_loop(move)
-            return play, a_game_states, a_predicted_scores[1:], d_game_states, d_predicted_scores[1:]
+            return play, a_game_states, a_predicted_scores, d_game_states, d_predicted_scores
         if move.restart:
-            return play, a_game_states, a_predicted_scores[1:], d_game_states, d_predicted_scores[1:]
+            return play, a_game_states, a_predicted_scores, d_game_states, d_predicted_scores
 
 
 def end_game_loop(move):
@@ -424,7 +439,7 @@ def do_human_turn(screen, board, move):
             return True
 
 
-def do_best_move(move, model, game_state_cache, sample_frac=1.0, screen=None, board=None, enable_remove=True):
+def do_best_move(move, model, game_state_cache, sample_frac=1.0, screen=None, board=None, enable_remove=True, temperature=0.1):
     """ Function to try all possible moves and select the best according to the model provided.
     """
     game_state = game_state_to_3d_array()
@@ -465,9 +480,6 @@ def do_best_move(move, model, game_state_cache, sample_frac=1.0, screen=None, bo
     best_game_state = None
     best_vm = None
     
-    # For simple game, add temperature scaling to encourage exploitation
-    temperature = 0.1 if simple_game else 1.0
-    
     for piece in pieces:
         if random.random() > sample_frac:
             continue
@@ -500,19 +512,16 @@ def do_best_move(move, model, game_state_cache, sample_frac=1.0, screen=None, bo
                     # Display final selected move if in interactive mode
                     if screen and board:
                         tafl.update_image(screen, board, move, 
-                                        f"Red: {len(tafl.Attackers.sprites())}", 
-                                        f"Blue: {len(tafl.Defenders.sprites())}",
-                                        highlight_pos=m,  # Highlight the chosen destination
+                                        f"Selected move ({piece.x_tile}, {piece.y_tile})->({m[0]}, {m[1]})",
+                                        f"Score: {best_score:.2f}",
+                                        highlight_pos=m,  # Highlight the destination square
                                         highlight_score=best_score)  # Show the final score
                         pygame.display.flip()
                         time.sleep(0.8)  # Slightly longer pause since this is the only visualization
                     
                     return game_state, best_score
                     
-                # Get model prediction and apply temperature scaling for simple game
-                score = model.predict(game_state.reshape(1, tafl.DIM, tafl.DIM, 3), verbose=0)[0][0]
-                if simple_game:
-                    score = score / temperature  # Scale logits by temperature
+                score = model.predict(game_state.reshape(1, tafl.DIM, tafl.DIM, 3), verbose=0)[0][0] + random.gauss(0, temperature)
                 
                 # Reverse candidate move
                 move.undo(tafl.Current.sprites()[0])
@@ -523,7 +532,7 @@ def do_best_move(move, model, game_state_cache, sample_frac=1.0, screen=None, bo
                     
                 # Check for move repetition
                 if score > best_score and not next(
-                        (True for elem in itertools.islice(game_state_cache, 4, game_state_cache.maxlen) if
+                        (True for elem in itertools.islice(game_state_cache, 0, game_state_cache.maxlen) if
                          np.array_equal(elem, game_state)), False):
                     best_score = score
                     best_piece = piece
@@ -561,8 +570,8 @@ def do_best_move(move, model, game_state_cache, sample_frac=1.0, screen=None, bo
         # Display final selected move if in interactive mode
         if screen and board:
             tafl.update_image(screen, board, move, 
-                            f"Red: {len(tafl.Attackers.sprites())}", 
-                            f"Blue: {len(tafl.Defenders.sprites())}",
+                            f"Selected move ({best_piece.x_tile}, {best_piece.y_tile})->({best_move[0]}, {best_move[1]})",
+                            f"Score: {best_score:.2f}",
                             highlight_pos=best_move,  # Highlight the chosen destination
                             highlight_score=best_score)  # Show the final score
             pygame.display.flip()
@@ -587,29 +596,25 @@ def initialize_random_cnn_model_3d_sonnet():
     - Multiple channels to represent different piece types and board positions (3 channels: attacker, king, defender)
     - Residual connections to help learn complex spatial relationships
     - Multiple convolutional layers with different kernel sizes to capture both local and broader patterns
-    - Batch normalization for stable training
     - Dropout for regularization
     """
     print("Initializing CNN model v2 for board game learning")
     
     input_shape = (tafl.DIM, tafl.DIM, 3)  # 3 channels: attacker, king, defender
-    std = 0.01  # Balanced between exploration (>0.02) and stability (<1.0)
+    std = 0.1  # Small std to prevent score explosion through deep network
     
     inputs = Input(shape=input_shape)
     
     # Initial convolution block
     x = Conv2D(64, (3, 3), padding='same', activation='relu',
                kernel_initializer=TruncatedNormal(mean=0.0, stddev=std))(inputs)
-    x = BatchNormalization()(x)
     
     # First residual block
     res = x
     x = Conv2D(64, (3, 3), padding='same', activation='relu',
                kernel_initializer=TruncatedNormal(mean=0.0, stddev=std))(x)
-    x = BatchNormalization()(x)
     x = Conv2D(64, (3, 3), padding='same',
                kernel_initializer=TruncatedNormal(mean=0.0, stddev=std))(x)
-    x = BatchNormalization()(x)
     x = Add()([x, res])
     x = Activation('relu')(x)
     
@@ -617,60 +622,94 @@ def initialize_random_cnn_model_3d_sonnet():
     # 5x5 for broader patterns like surrounding threats
     branch1 = Conv2D(32, (5, 5), padding='same', activation='relu',
                      kernel_initializer=TruncatedNormal(mean=0.0, stddev=std))(x)
+    
     # 3x3 for local patterns
     branch2 = Conv2D(32, (3, 3), padding='same', activation='relu',
                      kernel_initializer=TruncatedNormal(mean=0.0, stddev=std))(x)
+    
     # 1x1 for point-wise patterns
     branch3 = Conv2D(32, (1, 1), padding='same', activation='relu',
                      kernel_initializer=TruncatedNormal(mean=0.0, stddev=std))(x)
     
     x = Concatenate()([branch1, branch2, branch3])
-    x = BatchNormalization()(x)
     x = Dropout(0.2)(x)
     
     # Final convolution to reduce channels
     x = Conv2D(32, (3, 3), padding='same', activation='relu',
                kernel_initializer=TruncatedNormal(mean=0.0, stddev=std))(x)
-    x = BatchNormalization()(x)
     
     # Flatten and dense layers
     x = Flatten()(x)
     x = Dense(256, activation='relu',
               kernel_initializer=TruncatedNormal(mean=0.0, stddev=std))(x)
-    x = BatchNormalization()(x)
     x = Dropout(0.3)(x)
     x = Dense(128, activation='relu',
               kernel_initializer=TruncatedNormal(mean=0.0, stddev=std))(x)
-    x = BatchNormalization()(x)
-    x = Dense(1, kernel_initializer=TruncatedNormal(mean=0.0, stddev=std))(x)
+    
+    # Final layer with tanh to bound outputs between -1 and 1
+    x = Dense(1, activation='tanh',
+              kernel_initializer=TruncatedNormal(mean=0.0, stddev=std))(x)
     
     model = Model(inputs=inputs, outputs=x)
     
-    optimizer = Adam(learning_rate=0.01)  # Increased from 0.001 to 0.1 for faster learning
+    optimizer = Adam(learning_rate=0.001)  # Keep learning rate moderate
     model.compile(optimizer=optimizer, loss='mean_squared_error')
     
     model.summary()
     return model
 
 
-# def game_state_to_array():
-#     """ 2D Numpy array representation of game state for ML model.
-#
-#         DEPRECATED after moving to 3d game state
-#     """
-#     if tafl.Attackers is None or tafl.Defenders is None or tafl.Kings is None:
-#         print("Game not properly initialized.  Exiting.")
-#         sys.exit(1)
-#     arr = np.zeros((tafl.DIM, tafl.DIM), dtype=int)
-#
-#     for p in tafl.Attackers:
-#         arr[p.x_tile][p.y_tile] = '1'
-#     for p in tafl.Defenders:
-#         arr[p.x_tile][p.y_tile] = '2'
-#     for p in tafl.Kings:
-#         arr[p.x_tile][p.y_tile] = '3'
-#
-#     return arr
+def initialize_cnn_model_claude(input_shape):
+    std = 0.1
+    inputs = Input(shape=input_shape)
+    
+    # Initial convolution
+    x = Conv2D(64, (3, 3), padding='same', activation='relu',
+               kernel_initializer=TruncatedNormal(mean=0.0, stddev=std))(inputs)
+    
+    # Residual blocks
+    for _ in range(4):
+        res = x
+        x = Conv2D(64, (3, 3), padding='same', activation='relu',
+                   kernel_initializer=TruncatedNormal(mean=0.0, stddev=std))(x)
+        x = Conv2D(64, (3, 3), padding='same',
+                   kernel_initializer=TruncatedNormal(mean=0.0, stddev=std))(x)
+        x = Add()([x, res])
+        x = Activation('relu')(x)
+        x = Dropout(0.1)(x)
+    
+    # Pattern recognition block
+    branch1 = Conv2D(32, (5, 5), padding='same', activation='relu',
+                     kernel_initializer=TruncatedNormal(mean=0.0, stddev=std))(x)
+    branch2 = Conv2D(32, (3, 3), padding='same', activation='relu',
+                     kernel_initializer=TruncatedNormal(mean=0.0, stddev=std))(x)
+    branch3 = Conv2D(32, (1, 1), padding='same', activation='relu',
+                     kernel_initializer=TruncatedNormal(mean=0.0, stddev=std))(x)
+    
+    x = Concatenate()([branch1, branch2, branch3])
+    x = Dropout(0.2)(x)
+    
+    # Final convolution
+    x = Conv2D(32, (3, 3), padding='same', activation='relu',
+               kernel_initializer=TruncatedNormal(mean=0.0, stddev=std))(x)
+    
+    # Dense layers
+    x = Flatten()(x)
+    x = Dense(256, activation='relu',
+              kernel_initializer=TruncatedNormal(mean=0.0, stddev=std))(x)
+    x = Dropout(0.3)(x)
+    x = Dense(128, activation='relu', 
+              kernel_initializer=TruncatedNormal(mean=0.0, stddev=std))(x)
+    
+    # Output layer
+    x = Dense(1, activation='tanh',
+              kernel_initializer=TruncatedNormal(mean=0.0, stddev=std))(x)
+    
+    model = Model(inputs=inputs, outputs=x)
+    optimizer = Adam(learning_rate=0.01)
+    model.compile(optimizer=optimizer, loss='mean_squared_error')
+    
+    return model
 
 
 A_DIM = 0
@@ -689,11 +728,11 @@ def game_state_to_3d_array():
     arr = np.zeros((tafl.DIM, tafl.DIM, 3), dtype=int)
 
     for p in tafl.Attackers:
-        arr[p.x_tile][p.y_tile][A_DIM] = '1'
+        arr[p.x_tile][p.y_tile][A_DIM] = 1
     for p in tafl.Kings:
-        arr[p.x_tile][p.y_tile][K_DIM] = '1'
+        arr[p.x_tile][p.y_tile][K_DIM] = 1 
     for p in tafl.Defenders:
-        arr[p.x_tile][p.y_tile][D_DIM] = '1'
+        arr[p.x_tile][p.y_tile][D_DIM] = 1 
 
     return arr
 
@@ -736,14 +775,6 @@ def expand_game_states_symmetries(game_states):
     game_states_temp = [np.flip(gs, axis=0) for gs in game_states]
     game_states = np.concatenate((game_states, game_states_temp))
     return game_states
-
-
-def unison_shuffled_copies(a, b):
-    """ Used to shuffle the game states and corrected scores before retraining.
-    """
-    assert len(a) == len(b)
-    p = np.random.permutation(len(a))
-    return a[p], b[p]
 
 
 def smooth_corrected_scores(corrected_scores, num_to_smooth=50):
@@ -814,6 +845,91 @@ def smooth_corrected_scores_exp(corrected_scores, dynamic=True, decay_constant=5
             
         # Scale intermediate rewards by final magnitude
         corrected_scores[i] = (corrected_scores[i] + alpha * final_outcome + advantage_reward) / (1. + alpha)
+
+
+def update_model(model, states, rewards, batch_size=32):
+    """Train the model on a batch of state-reward pairs."""
+    if len(states) == 0:
+        return
+        
+    # Convert to numpy arrays
+    states = np.array(states)
+    rewards = np.array(rewards)
+    
+    # Get predictions before training for last few states
+    num_debug_states = min(3, len(states))
+    debug_states = states[-num_debug_states:]
+    debug_states_reshaped = debug_states.reshape(-1, tafl.DIM, tafl.DIM, 3)
+    before_preds = model.predict(debug_states_reshaped, verbose=0)
+    
+    # Use smaller batch size for draw games to prevent conflicting gradients
+    actual_batch_size = 8 if any(abs(rewards + 0.5) < 0.01) else batch_size
+    
+    # Train model
+    history = model.fit(
+        states.reshape(-1, tafl.DIM, tafl.DIM, 3), 
+        rewards,
+        batch_size=actual_batch_size,
+        epochs=1,
+        verbose=0
+    )
+    
+    # Get predictions after training
+    after_preds = model.predict(debug_states_reshaped, verbose=0)
+    
+    # Print debug info
+    print("\nModel prediction changes after training:")
+    print("State | Before  | After   | Target  | Change")
+    print("-" * 45)
+    for i in range(num_debug_states):
+        target = rewards[-num_debug_states + i]
+        before = before_preds[i][0]
+        after = after_preds[i][0]
+        change = after - before
+        direction = "✓" if (target > before and after > before) or (target < before and after < before) else "✗"
+        print(f"{i:5d} | {before:7.4f} | {after:7.4f} | {target:7.4f} | {change:+7.4f} {direction}")
+    
+    return history
+
+
+def initialize_compact_model_simple():
+    """ Initialize an extremely compact model specifically for 5x5 simple game mode.
+    The model focuses purely on spatial relationships between pieces, particularly
+    the relative positions of attacker vs king and potential blocking positions.
+    """
+    print("Initializing minimal model for simple game mode")
+    
+    input_shape = (tafl.DIM, tafl.DIM, 3)  # 3 channels: attacker, king, defender
+    std = 0.1
+    
+    inputs = Input(shape=input_shape)
+    
+    # Single conv layer to detect piece positions and basic spatial patterns
+    # Using 8 filters to keep it very simple
+    x = Conv2D(8, (3, 3), padding='same', activation='relu',
+               kernel_initializer=TruncatedNormal(mean=0.0, stddev=std))(inputs)
+    
+    # Direct 1x1 convolution to focus on piece presence
+    x = Conv2D(4, (1, 1), padding='same', activation='relu',
+               kernel_initializer=TruncatedNormal(mean=0.0, stddev=std))(x)
+    
+    # Flatten and minimal dense layer
+    x = Flatten()(x)
+    x = Dense(16, activation='relu',
+              kernel_initializer=TruncatedNormal(mean=0.0, stddev=std))(x)
+    
+    # Output with tanh activation
+    x = Dense(1, activation='tanh',
+              kernel_initializer=TruncatedNormal(mean=0.0, stddev=std))(x)
+    
+    model = Model(inputs=inputs, outputs=x)
+    
+    # Higher learning rate for faster adaptation
+    optimizer = Adam(learning_rate=0.01)
+    model.compile(optimizer=optimizer, loss='mean_squared_error')
+    
+    model.summary()
+    return model
 
 
 @click.command()
@@ -893,21 +1009,27 @@ def main(game_name, human_attacker, human_defender, interactive, train_attacker,
     attacker_model = None
     if not human_attacker:
         if load_latest:
-            a_model_files = glob(save_dir + '/attacker_model_*_games.h5')
+            a_model_files = glob(save_dir + '/attacker_model_*_games.keras')
             if len(a_model_files) > 0:
                 attacker_load = max([int(f.split("_")[4]) for f in a_model_files])  # Parse filenames and get latest
             else:
                 attacker_load = 0
         if attacker_load == 0:
-            attacker_model = initialize_random_cnn_model_3d_sonnet()
+            if game_name.lower() == "simple":
+                attacker_model = initialize_compact_model_simple()
+            else:
+                attacker_model = initialize_random_cnn_model_3d_sonnet()
         else:
-            attacker_model = load_model('{}/attacker_model_{}_games.h5'.format(save_dir, attacker_load))
+            attacker_model = load_model('{}/attacker_model_{}_games.keras'.format(save_dir, attacker_load))
+            # Recompile with fresh optimizer
+            optimizer = Adam(learning_rate=0.001)
+            attacker_model.compile(optimizer=optimizer, loss='mean_squared_error')
             num_train_games_attacker = attacker_load
 
     defender_model = None
     if not human_defender:
         if load_latest:
-            d_model_files = glob(save_dir + '/defender_model_*_games.h5')
+            d_model_files = glob(save_dir + '/defender_model_*_games.keras')
             if len(d_model_files) > 0:
                 defender_load = max([int(f.split("_")[4]) for f in d_model_files])  # Parse filenames and get latest
             else:
@@ -915,9 +1037,15 @@ def main(game_name, human_attacker, human_defender, interactive, train_attacker,
         if defender_load == -1:
             defender_model = None  # Defaults to mostly random + some extra King movements
         elif defender_load == 0:
-            defender_model = initialize_random_cnn_model_3d_sonnet()
+            if game_name.lower() == "simple":
+                defender_model = initialize_compact_model_simple()
+            else:
+                defender_model = initialize_random_cnn_model_3d_sonnet()
         else:
-            defender_model = load_model('{}/defender_model_{}_games.h5'.format(save_dir, defender_load))
+            defender_model = load_model('{}/defender_model_{}_games.keras'.format(save_dir, defender_load))
+            # Recompile with fresh optimizer
+            optimizer = Adam(learning_rate=0.001)
+            defender_model.compile(optimizer=optimizer, loss='mean_squared_error')
             num_train_games_defender = defender_load
 
     stats = None
@@ -967,9 +1095,11 @@ def main(game_name, human_attacker, human_defender, interactive, train_attacker,
         else:
             train_attacker = train_attacker_orig
 
+        attacker_temp = 0.1
+        defender_temp = 0.1
         play, a_game_states, a_corrected_scores, d_game_states, d_corrected_scores = \
             run_game(attacker_model, defender_model, human_attacker, human_defender, screen, game_name,
-                     sample_frac, frac_attackers_to_remove, frac_defenders_to_remove)
+                     sample_frac, attacker_temp, defender_temp, frac_attackers_to_remove, frac_defenders_to_remove)
 
         end = timer()
         game_duration = end - start
@@ -995,56 +1125,45 @@ def main(game_name, human_attacker, human_defender, interactive, train_attacker,
         # else: # PvP stats not tracked
 
         if train_attacker and attacker_model is not None and len(a_corrected_scores) > 0:
-            # print(np.array_repr( a_game_states[-2] ).replace('\n', ''))
-            # print(np.array_repr( a_game_states[-1] ).replace('\n', ''))
             if log_level>0:
+                print("\nTraining attacker model:")
                 print("""Last Attacker states: {}""".format(
-                      ' '.join(['{:+0.4f}'.format(entry) for entry in a_corrected_scores[-16:-1]])))
+                      ' '.join(['{:+0.4f}'.format(entry) for entry in a_corrected_scores[-15:]])))
             smooth_corrected_scores_exp(a_corrected_scores)
             if log_level>0:
                 print("""            Smoothed: {}""".format(
                       ' '.join(['{:+0.4f}'.format(entry) for entry in a_corrected_scores[-15:]])))
-            a_game_states, a_corrected_scores = unison_shuffled_copies(np.array(a_game_states),
-                                                                       np.array(a_corrected_scores))
+            # Convert to numpy arrays without shuffling
+            a_game_states = np.array(a_game_states)
+            a_corrected_scores = np.array(a_corrected_scores)
             if use_symmetry:
                 a_game_states = expand_game_states_symmetries(a_game_states)
                 a_corrected_scores = np.tile(a_corrected_scores, 8)
-            # Modify training parameters for better learning
-            attacker_model.fit(a_game_states.reshape(-1, tafl.DIM, tafl.DIM, 3),
-                               a_corrected_scores,
-                               epochs=5,  # Train multiple epochs to reinforce patterns
-                               batch_size=32,  # Use larger batch size for more stable updates
-                               verbose=0)
+            update_model(attacker_model, a_game_states, a_corrected_scores)
 
         if train_defender and defender_model is not None and len(d_corrected_scores) > 0:
-            # print(np.array_repr( d_game_states[-2] ).replace('\n', ''))
-            # print(np.array_repr( d_game_states[-1] ).replace('\n', ''))
             if log_level>0:
+                print("\nTraining defender model:")
                 print("""Last Defender states: {}""".format(
-                      ' '.join(['{:+0.4f}'.format(entry) for entry in d_corrected_scores[-16:-1]])))
+                      ' '.join(['{:+0.4f}'.format(entry) for entry in d_corrected_scores[-15:]])))
             smooth_corrected_scores_exp(d_corrected_scores)
             if log_level>0:
                 print("""            Smoothed: {}""".format(
                 ' '.join(['{:+0.4f}'.format(entry) for entry in d_corrected_scores[-15:]])))
-            d_game_states, d_corrected_scores = unison_shuffled_copies(np.array(d_game_states),
-                                                                       np.array(d_corrected_scores))
+            # Convert to numpy arrays without shuffling
+            d_game_states = np.array(d_game_states)
+            d_corrected_scores = np.array(d_corrected_scores)
             if use_symmetry:
                 d_game_states = expand_game_states_symmetries(d_game_states)
                 d_corrected_scores = np.tile(d_corrected_scores, 8)
-            # defender_model.fit(d_game_states.reshape(-1,11*11),d_corrected_scores,epochs=1,batch_size=1,verbose=0)
-            # defender_model.fit(d_game_states.reshape(-1,11,11,1),d_corrected_scores,epochs=1,batch_size=1,verbose=0)
-            defender_model.fit(d_game_states.reshape(-1, tafl.DIM, tafl.DIM, 3),
-                               d_corrected_scores,
-                               epochs=5,  # Train multiple epochs to reinforce patterns
-                               batch_size=32,  # Use larger batch size for more stable updates
-                               verbose=0)
+            update_model(defender_model, d_game_states, d_corrected_scores)
 
         if (stats.num_games_total() % cache_model_every == 0):  # Save every cache_model_every games
             # print('--- num games played: {}'.format(stats.num_games_total()))
             if num_train_games_attacker > 0: attacker_model.save(
-                '{}/attacker_model_{}_games.h5'.format(save_dir, num_train_games_attacker))
+                '{}/attacker_model_{}_games.keras'.format(save_dir, num_train_games_attacker))
             if num_train_games_defender > 0: defender_model.save(
-                '{}/defender_model_{}_games.h5'.format(save_dir, num_train_games_defender))
+                '{}/defender_model_{}_games.keras'.format(save_dir, num_train_games_defender))
             if train_attacker or train_defender: pickle.dump(stats, open(
                 '{}/StatsTracker_{}_games.pkl'.format(save_dir, stats.num_games_total()), 'wb'))
             if exit_after_cache:  # To avoid possible memory leak for long training sessions

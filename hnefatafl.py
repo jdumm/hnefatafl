@@ -729,7 +729,7 @@ def update_image(screen, board, move, text, text2, highlight_pos=None, highlight
                 GSIZE]
         # Draw the score with a larger font and white color for better visibility
         small_font = pygame.font.Font(None, 28)
-        score_text = f"{highlight_score:.2f}"
+        score_text = f"{highlight_score:.4f}"
         score_surf = small_font.render(score_text, True, (255, 255, 255))
         score_pos = score_surf.get_rect()
         score_pos.center = (xywh[0] + GSIZE//2, xywh[1] + GSIZE//2)
