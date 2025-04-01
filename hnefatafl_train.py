@@ -24,14 +24,12 @@ import itertools
 import pickle
 from collections import deque
 from copy import deepcopy
-from tensorflow import keras
-from tensorflow.keras import Sequential, Model, Input
-from tensorflow.keras.layers import Dense, Activation, Dropout, Conv2D, Flatten, MaxPooling2D, BatchNormalization, Add, Concatenate
-from tensorflow.keras.optimizers import SGD, Adam
-from tensorflow.keras.models import load_model
-from tensorflow.keras.initializers import TruncatedNormal
 import tensorflow as tf
-tf.config.run_functions_eagerly(True)  # Enable eager execution
+from keras import Sequential, Model, Input
+from keras.layers import Dense, Activation, Dropout, Conv2D, Flatten, MaxPooling2D, BatchNormalization, Add, Concatenate
+from keras.optimizers import SGD, Adam
+from keras.models import load_model
+from keras.initializers import TruncatedNormal
 
 import hnefatafl as tafl
 from stats_tracker import StatsTracker
