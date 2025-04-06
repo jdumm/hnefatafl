@@ -1,7 +1,8 @@
 from keras import Model, Input
-from keras.layers import Dense, Activation, Dropout, Conv2D, Flatten, Add, Concatenate
+from keras.layers import Dense, Activation, Dropout, Conv2D, Flatten, Add, Concatenate, BatchNormalization
 from keras.optimizers import Adam
 from keras.initializers import TruncatedNormal
+from tensorflow.keras.regularizers import l2
 
 
 def simple_model(dim, learning_rate=0.01):
@@ -40,7 +41,7 @@ def simple_model(dim, learning_rate=0.01):
     return model
 
 
-def sonnet_model(dim, learning_rate=0.001):
+def sonnet_model(dim, learning_rate=0.001, reg_strength=0.01):
     """ Initialize a CNN model optimized for 7x7 board game learning. """
     print("Initializing sonnet model")
     
@@ -51,48 +52,51 @@ def sonnet_model(dim, learning_rate=0.001):
     
     # Initial convolution block
     x = Conv2D(64, (3, 3), padding='same', activation='relu',
-               kernel_initializer=TruncatedNormal(mean=0.0, stddev=std))(inputs)
+               kernel_initializer=TruncatedNormal(mean=0.0, stddev=std),
+               kernel_regularizer=l2(reg_strength))(inputs)
     
-    # First residual block
+    # Simplified skip connection instead of full residual block
+    # Removed one Conv2D layer to reduce complexity
     res = x
     x = Conv2D(64, (3, 3), padding='same', activation='relu',
-               kernel_initializer=TruncatedNormal(mean=0.0, stddev=std))(x)
-    x = Conv2D(64, (3, 3), padding='same',
-               kernel_initializer=TruncatedNormal(mean=0.0, stddev=std))(x)
-    x = Add()([x, res])
-    x = Activation('relu')(x)
+               kernel_initializer=TruncatedNormal(mean=0.0, stddev=std),
+               kernel_regularizer=l2(reg_strength))(x)
+    x = Add()([x, res])  # Skip connection
+    x = BatchNormalization()(x)
     
     # Pattern recognition block - different kernel sizes
-    # 5x5 for broader patterns like surrounding threats
-    branch1 = Conv2D(32, (5, 5), padding='same', activation='relu',
-                     kernel_initializer=TruncatedNormal(mean=0.0, stddev=std))(x)
-    
     # 3x3 for local patterns
-    branch2 = Conv2D(32, (3, 3), padding='same', activation='relu',
-                     kernel_initializer=TruncatedNormal(mean=0.0, stddev=std))(x)
+    branch1 = Conv2D(32, (3, 3), padding='same', activation='relu',
+                     kernel_initializer=TruncatedNormal(mean=0.0, stddev=std),
+                     kernel_regularizer=l2(reg_strength))(x)
     
     # 1x1 for point-wise patterns
-    branch3 = Conv2D(32, (1, 1), padding='same', activation='relu',
-                     kernel_initializer=TruncatedNormal(mean=0.0, stddev=std))(x)
+    branch2 = Conv2D(32, (1, 1), padding='same', activation='relu',
+                     kernel_initializer=TruncatedNormal(mean=0.0, stddev=std),
+                     kernel_regularizer=l2(reg_strength))(x)
     
-    x = Concatenate()([branch1, branch2, branch3])
+    x = Concatenate()([branch1, branch2])
     x = Dropout(0.2)(x)
     
     # Final convolution to reduce channels
     x = Conv2D(32, (3, 3), padding='same', activation='relu',
-               kernel_initializer=TruncatedNormal(mean=0.0, stddev=std))(x)
+               kernel_initializer=TruncatedNormal(mean=0.0, stddev=std),
+               kernel_regularizer=l2(reg_strength))(x)
     
     # Flatten and dense layers
     x = Flatten()(x)
-    x = Dense(256, activation='relu',
-              kernel_initializer=TruncatedNormal(mean=0.0, stddev=std))(x)
+    x = Dense(128, activation='relu',  # Reduced from 256 to 128
+              kernel_initializer=TruncatedNormal(mean=0.0, stddev=std),
+              kernel_regularizer=l2(reg_strength))(x)
     x = Dropout(0.3)(x)
-    x = Dense(128, activation='relu',
-              kernel_initializer=TruncatedNormal(mean=0.0, stddev=std))(x)
+    x = Dense(64, activation='relu',  # Reduced from 128 to 64
+              kernel_initializer=TruncatedNormal(mean=0.0, stddev=std),
+              kernel_regularizer=l2(reg_strength))(x)
     
     # Final layer with tanh to bound outputs between -1 and 1
     x = Dense(1, activation='tanh',
-              kernel_initializer=TruncatedNormal(mean=0.0, stddev=std))(x)
+              kernel_initializer=TruncatedNormal(mean=0.0, stddev=std),
+              kernel_regularizer=l2(reg_strength))(x)
     
     model = Model(inputs=inputs, outputs=x)
     
