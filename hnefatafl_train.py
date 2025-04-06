@@ -212,8 +212,65 @@ def do_mostly_random_but_strike_to_kill_move(move):
             break
 
 
+def check_for_winning_move(move, is_attacker=True):
+    """Check if there's an immediate winning move available.
+    
+    Args:
+        move: The Move object
+        is_attacker: True if checking for attacker (king kill), False if defender (king escape)
+        
+    Returns:
+        tuple of (piece, move_coords) if winning move exists, None otherwise
+    """
+    if is_attacker:
+        # For attacker: Check for moves that kill the king
+        for piece in tafl.Attackers:
+            move.select(piece)
+            tafl.Current.add(piece)
+            if len(move.vm) > 0:
+                for m_coords in move.vm:
+                    # Try candidate move
+                    old_x, old_y = piece.x_tile, piece.y_tile
+                    move.is_valid_move(m_coords, piece, True)
+                    
+                    # Check if this move would kill the king
+                    move.remove_pieces(tafl.Defenders, tafl.Attackers, tafl.Kings, king_is_special)
+                    
+                    if move.king_killed:
+                        # Found a winning move! Undo and return the move
+                        move.undo(piece)
+                        move.select(piece)
+                        tafl.Current.empty()
+                        return (piece, m_coords)
+                    
+                    # Undo trial move
+                    move.undo(piece)
+            
+            # Clean up after checking this piece
+            move.select(piece)
+            tafl.Current.empty()
+    else:
+        # For defender: Check for king escape moves
+        for king in tafl.Kings:
+            move.select(king)
+            tafl.Current.add(king)
+            if len(move.vm) > 0:
+                for m_coords in move.vm:
+                    # Check if this is an escape square
+                    if m_coords in tafl.SPECIALSQS.difference([((tafl.DIM - 1) // 2, (tafl.DIM - 1) // 2)]):
+                        move.select(king)
+                        tafl.Current.empty()
+                        return (king, m_coords)
+            
+            # Clean up
+            move.select(king)
+            tafl.Current.empty()
+                
+    return None
+
+
 def run_game(attacker_model=None, defender_model=None, human_attacker=False, human_defender=False, screen=None,
-             game_name='Hnefatafl', sample_frac=1.0, attacker_temp=0.1, defender_temp=0.1, frac_attackers_to_remove=0, frac_defenders_to_remove=0):
+             game_name='Hnefatafl', sample_frac=1.0, attacker_temp=0.1, defender_temp=0.1, frac_attackers_to_remove=0, frac_defenders_to_remove=0, epsilon=0.1):
     """Start and run one game of computer attacker vs computer defender hnefatafl.
  
        Args:
@@ -226,6 +283,7 @@ def run_game(attacker_model=None, defender_model=None, human_attacker=False, hum
                         Default 1.0 considers all possible pieces and moves.
            frac_attackers_to_remove: Fraction of Attacker's pieces to remove at random, for autobalancing.
            frac_defenders_to_remove: Fraction of Defender's pieces to remove at random, for autobalancing.
+           epsilon: Probability of taking a random move (epsilon-greedy exploration)
     """
     board = tafl.Board(game_name)
     move = tafl.Move()
@@ -273,81 +331,193 @@ def run_game(attacker_model=None, defender_model=None, human_attacker=False, hum
             if human_attacker:
                 play = do_human_turn(screen, board, move)
             elif attacker_model is None:
-                game_state = do_random_move(move)
+                do_random_move(move)
+                game_state = game_state_to_3d_array()
                 predicted_score = (random.random() - 0.5) * 2
                 a_game_states.append(game_state)
                 a_predicted_scores.append(predicted_score)
             else:
                 if human_defender: time.sleep(0.5)
-                game_state, predicted_score = do_best_move(move,
-                                                           attacker_model,
-                                                           game_state_cache,
-                                                           sample_frac=sample_frac,
-                                                           temperature=attacker_temp,
-                                                           enable_remove=True if game_name.lower() != 'simple' else False,
-                                                           screen=screen,
-                                                           board=board)
-                # game_state,predicted_score = do_best_move(move,attacker_model,game_state_cache,sample_frac=1.00,screen=screen,board=board)
+                
+                # First check for winning moves (priority over both best move and random move)
+                winning_move = check_for_winning_move(move, is_attacker=True)
+                if winning_move:
+                    print(f"--- Attacker found immediate winning move (king kill) ---")
+                    piece, m_coords = winning_move
+                    move.select(piece)
+                    tafl.Current.add(piece)
+                    
+                    # Execute the winning move
+                    if move.is_valid_move(m_coords, piece, True):
+                        move.remove_pieces(tafl.Defenders, tafl.Attackers, tafl.Kings, king_is_special)
+                        game_state = game_state_to_3d_array()
+                        predicted_score = 1.0  # Winning move gets maximum score
+                        
+                        move.end_turn(piece)
+                        tafl.Current.empty()
+                        
+                        # Record state and predicted score
+                        a_game_states.append(game_state)
+                        a_predicted_scores.append(predicted_score)
+                        
+                        # Check if this winning move killed the king - if so, end game immediately
+                        if move.king_killed:
+                            text = "--- King killed! Attackers win!"
+                            print(text)
+                            text2 = "Play again? y/n"
+                            
+                            # Replace last predictions with win/loss values
+                            a_predicted_scores[-1] = +1.0
+                            if len(d_predicted_scores) > 0:
+                                d_predicted_scores[-1] = -1.0
+                                
+                            if screen:
+                                tafl.update_image(screen, board, move, text, text2)
+                                pygame.display.flip()
+                            if human_attacker or human_defender: play = end_game_loop(move)
+                            return play, a_game_states, a_predicted_scores, d_game_states, d_predicted_scores
+                        
+                        continue
+                
+                # Epsilon-greedy: randomly choose between exploration (random move) and exploitation (best move)
+                if random.random() < epsilon:
+                    # Exploration: Take a random move
+                    print(f"--- Epsilon-Greedy ({epsilon:.2f}): Taking random move for Attacker ---")
+                    do_random_move(move)
+                    game_state = game_state_to_3d_array()
+                    # Still predict the score for the resulting state for training consistency
+                    predicted_score = attacker_model.predict(game_state.reshape(1, tafl.DIM, tafl.DIM, 3), verbose=0)[0][0]
+                else:
+                    # Exploitation: Use the model to find the best move
+                    print(f"--- Epsilon-Greedy: Using best move for Attacker ---")
+                    game_state, predicted_score = do_best_move(move,
+                                                               attacker_model,
+                                                               game_state_cache,
+                                                               sample_frac=sample_frac,
+                                                               temperature=attacker_temp,
+                                                               enable_remove=True if game_name.lower() != 'simple' else False,
+                                                               screen=screen,
+                                                               board=board)
+                
+                # Record state and predicted score regardless of how the move was chosen
                 a_game_states.append(game_state)
                 a_predicted_scores.append(predicted_score)
+            
+            # Check for game-ending conditions after attacker's move
+            if move.king_killed:
+                text = "--- King killed! Attackers win!"
+                print(text)
+                text2 = "Play again? y/n"
+                
+                # Replace last predictions with win/loss values
+                if len(a_predicted_scores) > 0:
+                    a_predicted_scores[-1] = +1.0 
+                if len(d_predicted_scores) > 0:
+                    d_predicted_scores[-1] = -1.0
+                    
+                if screen:
+                    tafl.update_image(screen, board, move, text, text2)
+                    pygame.display.flip()
+                if human_attacker or human_defender: play = end_game_loop(move)
+                return play, a_game_states, a_predicted_scores, d_game_states, d_predicted_scores
+            
         else:
             # print("Defender's Turn: Move {}".format(num_moves))
             if human_defender:
                 play = do_human_turn(screen, board, move)
             elif defender_model is None:
                 # game_state = do_mostly_random_but_strike_to_kill_move(move)
-                game_state = do_dummy_1_defender_move(move)
+                do_dummy_1_defender_move(move)
+                game_state = game_state_to_3d_array()
                 predicted_score = (random.random() - 0.5) * 2
                 d_game_states.append(game_state)
                 d_predicted_scores.append(predicted_score)
             else:
                 if human_attacker: time.sleep(0.5)
-                game_state, predicted_score = do_best_move(move,
-                                                           defender_model,
-                                                           game_state_cache,
-                                                           sample_frac=sample_frac,
-                                                           temperature=defender_temp,
-                                                           enable_remove=True if game_name.lower() != 'simple' else False,
-                                                           screen=screen,
-                                                           board=board)
-                # game_state,predicted_score = do_best_move(move,defender_model,game_state_cache,sample_frac=1.00,screen=screen,board=board)
+                
+                # First check for winning moves (priority over both best move and random move)
+                winning_move = check_for_winning_move(move, is_attacker=False)
+                if winning_move:
+                    print(f"--- Defender found immediate winning move (king escape) ---")
+                    piece, m_coords = winning_move
+                    move.select(piece)
+                    tafl.Current.add(piece)
+                    
+                    # Execute the winning move
+                    if move.is_valid_move(m_coords, piece, True):
+                        move.king_escaped(tafl.Kings)
+                        move.remove_pieces(tafl.Attackers, tafl.Defenders, tafl.Kings, king_is_special)
+                        game_state = game_state_to_3d_array()
+                        predicted_score = 1.0  # Winning move gets maximum score
+                        
+                        move.end_turn(piece)
+                        tafl.Current.empty()
+                        
+                        # Record state and predicted score
+                        d_game_states.append(game_state)
+                        d_predicted_scores.append(predicted_score)
+                        
+                        # Check if this winning move caused escape - if so, end game immediately
+                        if move.escaped:
+                            text = "--- King escaped! Defenders win!"
+                            print(text)
+                            text2 = "Play again? y/n"
+                            
+                            # Replace last predictions with win/loss values
+                            if len(a_predicted_scores) > 0:
+                                a_predicted_scores[-1] = -1.0
+                            d_predicted_scores[-1] = +1.0
+                                
+                            if screen:
+                                tafl.update_image(screen, board, move, text, text2)
+                                pygame.display.flip()
+                            if human_attacker or human_defender: play = end_game_loop(move)
+                            return play, a_game_states, a_predicted_scores, d_game_states, d_predicted_scores
+                        
+                        continue
+                
+                # Epsilon-greedy: randomly choose between exploration (random move) and exploitation (best move)
+                if random.random() < epsilon:
+                    # Exploration: Take a random move
+                    print(f"--- Epsilon-Greedy ({epsilon:.2f}): Taking random move for Defender ---")
+                    do_random_move(move)
+                    game_state = game_state_to_3d_array()
+                    # Still predict the score for the resulting state for training consistency
+                    predicted_score = defender_model.predict(game_state.reshape(1, tafl.DIM, tafl.DIM, 3), verbose=0)[0][0]
+                else:
+                    # Exploitation: Use the model to find the best move
+                    print(f"--- Epsilon-Greedy: Using best move for Defender ---")
+                    game_state, predicted_score = do_best_move(move,
+                                                               defender_model,
+                                                               game_state_cache,
+                                                               sample_frac=sample_frac,
+                                                               temperature=defender_temp,
+                                                               enable_remove=True if game_name.lower() != 'simple' else False,
+                                                               screen=screen,
+                                                               board=board)
+                
+                # Record state and predicted score regardless of how the move was chosen
                 d_game_states.append(game_state)
                 d_predicted_scores.append(predicted_score)
+            
+            # Check for game-ending conditions after defender's move
+            if move.escaped:
+                text = "--- King escaped! Defenders win!"
+                print(text)
+                text2 = "Play again? y/n"
+                
+                # Replace last predictions with win/loss values
+                if len(a_predicted_scores) > 0:
+                    a_predicted_scores[-1] = -1.0
+                if len(d_predicted_scores) > 0:
+                    d_predicted_scores[-1] = +1.0
+                    
+                if screen:
+                    tafl.update_image(screen, board, move, text, text2)
+                    pygame.display.flip()
+                if human_attacker or human_defender: play = end_game_loop(move)
+                return play, a_game_states, a_predicted_scores, d_game_states, d_predicted_scores
 
-        if move.escaped:
-            text = "--- King escaped! Defenders win!"
-            print(text)
-            text2 = "Play again? y/n"
-            # Scale reward based on number of moves - faster wins get higher rewards
-            
-            # Replace last predictions instead of appending
-            if len(a_predicted_scores) > 0:
-                a_predicted_scores[-1] = -1.0
-            if len(d_predicted_scores) > 0:
-                d_predicted_scores[-1] = +1.0
-                
-            if screen:
-                tafl.update_image(screen, board, move, text, text2)
-                pygame.display.flip()
-            if human_attacker or human_defender: play = end_game_loop(move)
-            return play, a_game_states, a_predicted_scores, d_game_states, d_predicted_scores
-        if move.king_killed:
-            text = "--- King killed! Attackers win!"
-            print(text)
-            text2 = "Play again? y/n"
-            # Scale reward based on number of moves - faster wins get higher rewards
-            
-            # Replace last predictions instead of appending
-            if len(a_predicted_scores) > 0:
-                a_predicted_scores[-1] = +1.0 
-            if len(d_predicted_scores) > 0:
-                d_predicted_scores[-1] = -1.0
-                
-            if screen:
-                tafl.update_image(screen, board, move, text, text2)
-                pygame.display.flip()
-            if human_attacker or human_defender: play = end_game_loop(move)
-            return play, a_game_states, a_predicted_scores, d_game_states, d_predicted_scores
         if move.restart:
             return play, a_game_states, a_predicted_scores, d_game_states, d_predicted_scores
 
@@ -784,7 +954,7 @@ def update_model(model, states, rewards, batch_size=32, learning_rate=None):
 @click.option('-g', '--game-name', default='Hnefatafl', help='Name of Tafl variant to play')
 @click.option('-ha/-aa', '--human-attacker/--ai-attacker', default=False, help='Set to play attacker manually')
 @click.option('-hd/-ad', '--human-defender/--ai-defender', default=False, help='Set to play defender manually')
-@click.option('-i/-b', '--interactive/--batch', default=False, help='Set true in order to watch AI vs AI matches')
+@click.option('-i/-b', '--interactive/--batch', default=False, help='Set to watch AI vs AI matches')
 @click.option('-ta/-na', '--train-attacker/--no-train-attacker', default=False,
               help='Set to update attacker AI after each game')
 @click.option('-td/-nd', '--train-defender/--no-train-defender', default=False,
@@ -801,10 +971,11 @@ def update_model(model, states, rewards, batch_size=32, learning_rate=None):
 @click.option('-v', '--version', default=7, help='Model version number')
 @click.option('--initial-lr', default=0.001, help='Initial learning rate for model training')
 @click.option('-ld/-nld', '--lr-decay/--no-lr-decay', default=False, help='Enable learning rate decay during training')
+@click.option('--epsilon', default=0.1, type=float, help='Probability of taking a random move (epsilon-greedy, 0.0 to 1.0)')
 def main(game_name, human_attacker, human_defender, interactive, train_attacker, train_defender, dynamic_train,
          cache_model_every, exit_after_cache, use_symmetry,
          attacker_load, defender_load, stats_load, load_latest, version,
-         initial_lr, lr_decay):
+         initial_lr, lr_decay, epsilon):
     """Main training loop."""
 
     global king_is_special
@@ -950,7 +1121,7 @@ def main(game_name, human_attacker, human_defender, interactive, train_attacker,
         defender_temp = 0.1
         play, a_game_states, a_corrected_scores, d_game_states, d_corrected_scores = \
             run_game(attacker_model, defender_model, human_attacker, human_defender, screen, game_name,
-                     sample_frac, attacker_temp, defender_temp, frac_attackers_to_remove, frac_defenders_to_remove)
+                     sample_frac, attacker_temp, defender_temp, frac_attackers_to_remove, frac_defenders_to_remove, epsilon=epsilon)
 
         end = timer()
         game_duration = end - start
