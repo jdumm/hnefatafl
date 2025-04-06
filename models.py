@@ -4,7 +4,7 @@ from keras.optimizers import Adam
 from keras.initializers import TruncatedNormal
 
 
-def simple_model(dim):
+def simple_model(dim, learning_rate=0.01):
     """ Initialize a compact model for simple game mode. """
     print("Initializing simple model")
     
@@ -32,15 +32,15 @@ def simple_model(dim):
     
     model = Model(inputs=inputs, outputs=x)
     
-    # Higher learning rate for faster adaptation
-    optimizer = Adam(learning_rate=0.01)
+    # Use provided learning rate
+    optimizer = Adam(learning_rate=learning_rate)
     model.compile(optimizer=optimizer, loss='mean_squared_error')
     
     model.summary()
     return model
 
 
-def sonnet_model(dim):
+def sonnet_model(dim, learning_rate=0.001):
     """ Initialize a CNN model optimized for 7x7 board game learning. """
     print("Initializing sonnet model")
     
@@ -96,14 +96,15 @@ def sonnet_model(dim):
     
     model = Model(inputs=inputs, outputs=x)
     
-    optimizer = Adam(learning_rate=0.001)  # Keep learning rate moderate
+    # Use provided learning rate
+    optimizer = Adam(learning_rate=learning_rate)
     model.compile(optimizer=optimizer, loss='mean_squared_error')
     
     model.summary()
     return model
 
 
-def claude_model(dim):
+def claude_model(dim, learning_rate=0.01):
     """ Initialize a CNN model with residual blocks for complex board game learning. """
     print("Initializing claude model")
     
@@ -154,7 +155,9 @@ def claude_model(dim):
               kernel_initializer=TruncatedNormal(mean=0.0, stddev=std))(x)
     
     model = Model(inputs=inputs, outputs=x)
-    optimizer = Adam(learning_rate=0.01)
+    
+    # Use provided learning rate
+    optimizer = Adam(learning_rate=learning_rate)
     model.compile(optimizer=optimizer, loss='mean_squared_error')
     
     return model 

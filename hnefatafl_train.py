@@ -3,6 +3,11 @@ An extension of Hnefatafl to include AI training, AI vs AI, and Player vs AI (at
 
 A full description of the game can be found here: https://en.wikipedia.org/wiki/Tafl_games
 
+Learning Rate Features:
+- Use --initial-lr to set the starting learning rate (default 0.001)
+- Use --lr-decay to enable automatic learning rate decay during training
+  (decays based on number of games the model has been trained on)
+
 Author: Jon Dumm
 Date: 4/4/2019
 
@@ -723,11 +728,18 @@ def smooth_corrected_scores_exp(corrected_scores, dynamic=True, decay_constant=5
         corrected_scores[i] = (corrected_scores[i] + alpha * final_outcome + advantage_reward) / (1. + alpha)
 
 
-def update_model(model, states, rewards, batch_size=32):
+def update_model(model, states, rewards, batch_size=32, learning_rate=None):
     """Train the model on a batch of state-reward pairs."""
     if len(states) == 0:
         return
         
+    # Update learning rate if provided
+    if learning_rate is not None:
+        current_lr = tf.keras.backend.get_value(model.optimizer.learning_rate)
+        if current_lr != learning_rate:
+            print(f"Updating learning rate: {current_lr:.6f} -> {learning_rate:.6f}")
+            tf.keras.backend.set_value(model.optimizer.learning_rate, learning_rate)
+    
     # Convert to numpy arrays
     states = np.array(states)
     rewards = np.array(rewards)
@@ -787,9 +799,12 @@ def update_model(model, states, rewards, batch_size=32):
 @click.option('-sl', '--stats-load', default=0, help='Stats model file num to load')
 @click.option('-ll/-nl', '--load-latest/--not-latest', default=False, help='Set to search and use latest models/stats files')
 @click.option('-v', '--version', default=7, help='Model version number')
+@click.option('--initial-lr', default=0.001, help='Initial learning rate for model training')
+@click.option('-ld/-nld', '--lr-decay/--no-lr-decay', default=False, help='Enable learning rate decay during training')
 def main(game_name, human_attacker, human_defender, interactive, train_attacker, train_defender, dynamic_train,
          cache_model_every, exit_after_cache, use_symmetry,
-         attacker_load, defender_load, stats_load, load_latest, version):
+         attacker_load, defender_load, stats_load, load_latest, version,
+         initial_lr, lr_decay):
     """Main training loop."""
 
     global king_is_special
@@ -852,13 +867,13 @@ def main(game_name, human_attacker, human_defender, interactive, train_attacker,
                 attacker_load = 0
         if attacker_load == 0:
             if game_name.lower() == "simple":
-                attacker_model = simple_model(tafl.DIM)
+                attacker_model = simple_model(tafl.DIM, learning_rate=initial_lr)
             else:
-                attacker_model = sonnet_model(tafl.DIM)
+                attacker_model = sonnet_model(tafl.DIM, learning_rate=initial_lr)
         else:
             attacker_model = load_model('{}/attacker_model_{}_games.keras'.format(save_dir, attacker_load))
             # Recompile with fresh optimizer
-            optimizer = Adam(learning_rate=0.001)
+            optimizer = Adam(learning_rate=initial_lr)
             attacker_model.compile(optimizer=optimizer, loss='mean_squared_error')
             num_train_games_attacker = attacker_load
 
@@ -874,13 +889,13 @@ def main(game_name, human_attacker, human_defender, interactive, train_attacker,
             defender_model = None  # Defaults to mostly random + some extra King movements
         elif defender_load == 0:
             if game_name.lower() == "simple":
-                defender_model = simple_model(tafl.DIM)
+                defender_model = simple_model(tafl.DIM, learning_rate=initial_lr)
             else:
-                defender_model = sonnet_model(tafl.DIM)
+                defender_model = sonnet_model(tafl.DIM, learning_rate=initial_lr)
         else:
             defender_model = load_model('{}/defender_model_{}_games.keras'.format(save_dir, defender_load))
             # Recompile with fresh optimizer
-            optimizer = Adam(learning_rate=0.001)
+            optimizer = Adam(learning_rate=initial_lr)
             defender_model.compile(optimizer=optimizer, loss='mean_squared_error')
             num_train_games_defender = defender_load
 
@@ -975,7 +990,14 @@ def main(game_name, human_attacker, human_defender, interactive, train_attacker,
             if use_symmetry:
                 a_game_states = expand_game_states_symmetries(a_game_states)
                 a_corrected_scores = np.tile(a_corrected_scores, 8)
-            update_model(attacker_model, a_game_states, a_corrected_scores)
+            
+            # Calculate learning rate with decay if enabled
+            current_lr = initial_lr
+            if lr_decay:
+                decay_factor = 0.1
+                current_lr = initial_lr * (1.0 / (1.0 + decay_factor * num_train_games_attacker / 1000))
+            
+            update_model(attacker_model, a_game_states, a_corrected_scores, learning_rate=current_lr)
 
         if train_defender and defender_model is not None and len(d_corrected_scores) > 0:
             if log_level>0:
@@ -992,7 +1014,14 @@ def main(game_name, human_attacker, human_defender, interactive, train_attacker,
             if use_symmetry:
                 d_game_states = expand_game_states_symmetries(d_game_states)
                 d_corrected_scores = np.tile(d_corrected_scores, 8)
-            update_model(defender_model, d_game_states, d_corrected_scores)
+            
+            # Calculate learning rate with decay if enabled
+            current_lr = initial_lr
+            if lr_decay:
+                decay_factor = 0.1
+                current_lr = initial_lr * (1.0 / (1.0 + decay_factor * num_train_games_defender / 1000))
+            
+            update_model(defender_model, d_game_states, d_corrected_scores, learning_rate=current_lr)
 
         if (stats.num_games_total() % cache_model_every == 0):  # Save every cache_model_every games
             # print('--- num games played: {}'.format(stats.num_games_total()))
