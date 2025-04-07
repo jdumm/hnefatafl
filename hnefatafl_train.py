@@ -321,6 +321,63 @@ def run_game(attacker_model=None, defender_model=None, human_attacker=False, hum
                     sys.exit()
                 if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                     pass
+                    
+        # Check for no-pieces condition before trying to make a move
+        if len(tafl.Attackers.sprites()) == 0:
+            text = "--- All attackers eliminated! Defenders win!"
+            if log_level > 0:
+                print(text)
+            text2 = "Play again? y/n"
+            
+            # Replace last predictions with win/loss values
+            if len(a_predicted_scores) > 0:
+                a_predicted_scores[-1] = LOSS_REWARD
+            if len(d_predicted_scores) > 0:
+                d_predicted_scores[-1] = WIN_REWARD
+                
+            if screen:
+                tafl.update_image(screen, board, move, text, text2)
+                pygame.display.flip()
+            if human_attacker or human_defender: play = end_game_loop(move)
+            return play, a_game_states, a_predicted_scores, d_game_states, d_predicted_scores
+            
+        if len(tafl.Defenders.sprites()) == 0:
+            text = "--- All defenders eliminated! Attackers win!"
+            if log_level > 0:
+                print(text)
+            text2 = "Play again? y/n"
+            
+            # Replace last predictions with win/loss values
+            if len(a_predicted_scores) > 0:
+                a_predicted_scores[-1] = WIN_REWARD
+            if len(d_predicted_scores) > 0:
+                d_predicted_scores[-1] = LOSS_REWARD
+                
+            if screen:
+                tafl.update_image(screen, board, move, text, text2)
+                pygame.display.flip()
+            if human_attacker or human_defender: play = end_game_loop(move)
+            return play, a_game_states, a_predicted_scores, d_game_states, d_predicted_scores
+        
+        # Check if the king is still alive, if not, attackers win
+        if len(tafl.Kings.sprites()) == 0:
+            text = "--- King killed! Attackers win!"
+            if log_level > 0:
+                print(text)
+            text2 = "Play again? y/n"
+            
+            # Replace last predictions with win/loss values
+            if len(a_predicted_scores) > 0:
+                a_predicted_scores[-1] = WIN_REWARD
+            if len(d_predicted_scores) > 0:
+                d_predicted_scores[-1] = LOSS_REWARD
+                
+            if screen:
+                tafl.update_image(screen, board, move, text, text2)
+                pygame.display.flip()
+            if human_attacker or human_defender: play = end_game_loop(move)
+            return play, a_game_states, a_predicted_scores, d_game_states, d_predicted_scores
+            
         if num_moves >= 100 or (game_name.lower() == "simple" and num_moves > 4):
             if log_level > 0:
                 print("--- Draw game after {} moves".format(num_moves))
