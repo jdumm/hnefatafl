@@ -55,7 +55,15 @@ class Move(object):
         """
         if not self.selected:
             self.selected = True
-            piece.color = (71, 166, 169)
+            # Lighten the piece's base color instead of using a fixed color
+            # Mix with white by taking 70% of original color + 30% white
+            r, g, b = piece.base_color
+            lightened_color = (
+                int(r * 0.7 + 255 * 0.4),  # 40% brighter
+                int(g * 0.7 + 255 * 0.4),
+                int(b * 0.7 + 255 * 0.4)
+            )
+            piece.color = lightened_color
             self.row = piece.x_tile
             self.col = piece.y_tile
             self.vm = self.valid_moves(piece.special_sqs)
