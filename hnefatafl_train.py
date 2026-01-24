@@ -271,7 +271,7 @@ def check_for_winning_move(move, is_attacker=True):
 
 def run_game(attacker_model=None, defender_model=None, human_attacker=False, human_defender=False, screen=None,
              game_name='Hnefatafl', sample_frac=1.0, attacker_temp=0.1, defender_temp=0.1, 
-             frac_attackers_to_remove=0, frac_defenders_to_remove=0, epsilon=0.1, log_level=0):
+             frac_attackers_to_remove=0, frac_defenders_to_remove=0, epsilon_attacker=0.1, epsilon_defender=0.1, log_level=0):
     """Start and run one game of computer attacker vs computer defender hnefatafl.
  
        Args:
@@ -284,7 +284,8 @@ def run_game(attacker_model=None, defender_model=None, human_attacker=False, hum
                         Default 1.0 considers all possible pieces and moves.
            frac_attackers_to_remove: Fraction of Attacker's pieces to remove at random, for autobalancing.
            frac_defenders_to_remove: Fraction of Defender's pieces to remove at random, for autobalancing.
-           epsilon: Probability of taking a random move (epsilon-greedy exploration)
+          epsilon_attacker: Probability of taking a random move for Attacker (epsilon-greedy exploration)
+          epsilon_defender: Probability of taking a random move for Defender (epsilon-greedy exploration)
            log_level: Controls verbosity of output (0=minimal, 1=normal, 2=debug)
     """
     # Define scaled reward values - using 0.8 instead of 1.0 to avoid extreme targets
@@ -447,10 +448,10 @@ def run_game(attacker_model=None, defender_model=None, human_attacker=False, hum
                         continue
                 
                 # Epsilon-greedy: randomly choose between exploration (random move) and exploitation (best move)
-                if random.random() < epsilon:
+                if random.random() < epsilon_attacker:
                     # Exploration: Take a random move
                     if log_level > 1:
-                        print(f"--- Epsilon-Greedy ({epsilon:.2f}): Taking random move for Attacker ---")
+                        print(f"--- Epsilon-Greedy ({epsilon_attacker:.2f}): Taking random move for Attacker ---")
                     do_random_move(move)
                     game_state = game_state_to_3d_array()
                     # Still predict the score for the resulting state for training consistency
@@ -549,10 +550,10 @@ def run_game(attacker_model=None, defender_model=None, human_attacker=False, hum
                         continue
                 
                 # Epsilon-greedy: randomly choose between exploration (random move) and exploitation (best move)
-                if random.random() < epsilon:
+                if random.random() < epsilon_defender:
                     # Exploration: Take a random move
                     if log_level > 1:
-                        print(f"--- Epsilon-Greedy ({epsilon:.2f}): Taking random move for Defender ---")
+                        print(f"--- Epsilon-Greedy ({epsilon_defender:.2f}): Taking random move for Defender ---")
                     do_random_move(move)
                     game_state = game_state_to_3d_array()
                     # Still predict the score for the resulting state for training consistency
@@ -826,9 +827,62 @@ def do_best_move(move, model, game_state_cache, sample_frac=1.0, screen=None, bo
     # Apply repetition penalty
     final_scores = batch_predictions + repetition_penalty
     
-    # Find the move with the highest score
+    # Find the move with the highest score, but avoid defender moves that allow immediate attacker win next turn
     best_index = np.argmax(final_scores)
     best_score = float(batch_predictions[best_index])  # Use the original prediction as the score
+    # Simple 1-ply safety check for defender: avoid moves that give attacker an immediate kill
+    def defender_move_gives_attacker_win(idx):
+        if move.a_turn:
+            return False
+        # Re-simulate the selected move
+        piece = all_pieces[idx]
+        sel_move = all_moves[idx]
+        move.select(piece)
+        tafl.Current.add(piece)
+        if not move.is_valid_move(sel_move, tafl.Current.sprites()[0], True):
+            move.select(piece)
+            tafl.Current.empty()
+            return False
+        # Apply captures
+        if enable_remove:
+            move.remove_pieces(tafl.Attackers, tafl.Defenders, tafl.Kings, king_is_special)
+        # Now attacker to move: check if any attacker move kills king
+        immediate_kill = False
+        for a in tafl.Attackers:
+            move.select(a)
+            tafl.Current.add(a)
+            for m in list(move.vm):
+                move.is_valid_move(m, a, True)
+                move.remove_pieces(tafl.Defenders, tafl.Attackers, tafl.Kings, king_is_special)
+                if move.king_killed:
+                    immediate_kill = True
+                    move.undo(a)
+                    break
+                move.undo(a)
+            move.select(a)
+            tafl.Current.empty()
+            if immediate_kill:
+                break
+        # Undo defender trial move
+        move.undo(piece)
+        move.select(piece)
+        tafl.Current.empty()
+        return immediate_kill
+
+    if not move.a_turn:
+        # Try to pick a safe move if top choice is unsafe
+        unsafe = defender_move_gives_attacker_win(best_index)
+        if unsafe:
+            # Penalize unsafe candidates heavily and reselect
+            penalized = final_scores.copy()
+            for i in range(len(all_moves)):
+                try:
+                    if defender_move_gives_attacker_win(i):
+                        penalized[i] -= 2.0
+                except Exception:
+                    pass
+            best_index = np.argmax(penalized)
+
     best_piece = all_pieces[best_index]
     best_move = all_moves[best_index]
     
@@ -949,10 +1003,13 @@ def smooth_corrected_scores(corrected_scores, num_to_smooth=50):
             -1 * (i + 1)]) / 3.  # weighted average
 
 
-def smooth_corrected_scores_exp(corrected_scores, dynamic=True, decay_constant=5.):
+def smooth_corrected_scores_exp(corrected_scores, game_states=None, side=None, dynamic=True, decay_constant=5., shaping_multiplier=1.0):
     """ Smooth out the lead up to the final state for faster learning.
-        Add intermediate rewards based on game state advantages and spatial understanding.
-        Especially tuned for the simple game mode to understand positioning.
+        Adds intermediate rewards based on spatial features. Works for any DIM.
+        Args:
+            corrected_scores: list[float] terminal-shaped rewards per ply (in-place modified)
+            game_states: optional list[np.ndarray] of shape (DIM, DIM, 3) for each ply
+            side: optional string 'attacker' | 'defender' indicating which model is being trained
     """
     if dynamic: 
         decay_constant = float(len(corrected_scores)) / 2.  # 1/2 game length
@@ -961,27 +1018,30 @@ def smooth_corrected_scores_exp(corrected_scores, dynamic=True, decay_constant=5
     final_outcome = corrected_scores[-1]
     final_magnitude = abs(final_outcome)  # Preserve the magnitude of win/loss
     
-    # For simple game mode, add strong positional rewards
-    if tafl.DIM == 5:  # Simple game mode
+    # Helper: compute king position and adjacency counts from a 3D state array
+    def _king_features_from_state(state):
+        dim = state.shape[0]
+        # Locate king
         king_pos = None
-        attacker_pos = None
-        for p in tafl.Kings:
-            king_pos = (p.x_tile, p.y_tile)
-        for p in tafl.Attackers:
-            attacker_pos = (p.x_tile, p.y_tile)
-            
-        if king_pos and attacker_pos:
-            # Calculate distance to nearest corner
-            corners = [(0,0), (0,4), (4,0), (4,4)]
-            min_corner_dist = min(abs(king_pos[0] - c[0]) + abs(king_pos[1] - c[1]) for c in corners)
-            
-            # Calculate if attacker is between king and nearest corner
-            blocking_bonus = 0
-            for corner in corners:
-                if (min(king_pos[0], corner[0]) <= attacker_pos[0] <= max(king_pos[0], corner[0]) and
-                    min(king_pos[1], corner[1]) <= attacker_pos[1] <= max(king_pos[1], corner[1])):
-                    blocking_bonus = 0.3
-                    break
+        where_k = np.argwhere(state[:, :, K_DIM] == 1)
+        if where_k.size > 0:
+            king_pos = tuple(where_k[0])  # (x, y)
+        # Count orthogonal neighbors
+        adj_def = 0
+        adj_att = 0
+        if king_pos is not None:
+            x, y = king_pos
+            for dx, dy in [(-1,0), (1,0), (0,-1), (0,1)]:
+                nx, ny = x + dx, y + dy
+                if 0 <= nx < dim and 0 <= ny < dim:
+                    adj_def += int(state[nx, ny, D_DIM] == 1)
+                    adj_att += int(state[nx, ny, A_DIM] == 1)
+        return king_pos, adj_def, adj_att
+
+    # First shaping: king cover by defenders (applies to defender side positively, attacker side negatively)
+    cover_weight = 0.05 * shaping_multiplier  # small per-neighbor reward
+    # Second shaping: attacker adjacency penalty to king, with safe corridor exception
+    attacker_adj_penalty = 0.06 * shaping_multiplier
     
     # Shape rewards to encourage progress toward goal
     for i in range(len(corrected_scores) - 1):
@@ -989,13 +1049,174 @@ def smooth_corrected_scores_exp(corrected_scores, dynamic=True, decay_constant=5
         position = len(corrected_scores) - i - 1
         alpha = math.exp(-position / decay_constant)
         
-        # Add positional rewards for simple game
-        if tafl.DIM == 5:
-            if final_outcome > 0:  # Attacker won
-                corrected_scores[i] += blocking_bonus
-            else:  # Defender won
-                if min_corner_dist < 3:  # Reward being closer to corners
-                    corrected_scores[i] += (3 - min_corner_dist) * 0.2
+        # Generalized shaping using provided state snapshot if available
+        if game_states is not None and i < len(game_states):
+            st = game_states[i]
+            try:
+                dim = st.shape[0]
+                # compute features
+                king_pos, adj_def, adj_att = _king_features_from_state(st)
+                if king_pos is not None and side is not None:
+                    _before = corrected_scores[i]
+                    # King cover by defenders
+                    if side == 'defender':
+                        corrected_scores[i] += cover_weight * adj_def
+                    elif side == 'attacker':
+                        corrected_scores[i] -= cover_weight * adj_def
+
+                    # Attacker adjacency penalty (always penalize adjacency; corridor is risky in practice)
+                    if adj_att > 0:
+                        x, y = king_pos
+                        if side == 'defender':
+                            corrected_scores[i] -= attacker_adj_penalty * adj_att
+                        elif side == 'attacker':
+                            corrected_scores[i] += attacker_adj_penalty * adj_att
+
+                    # Pinch-risk near specials (center/corners) with opposite attacker side
+                    cx, cy = dim // 2, dim // 2
+                    specials = {(0, 0), (0, dim-1), (dim-1, 0), (dim-1, dim-1), (cx, cy)}
+                    pinch_penalty = 0.08 * shaping_multiplier
+                    def is_special(pos):
+                        return pos in specials
+                    def is_empty(pos):
+                        px, py = pos
+                        return 0 <= px < dim and 0 <= py < dim and st[px, py].sum() == 0
+                    # For each direction, check pairs around king
+                    for (dx, dy) in [(-1,0),(1,0),(0,-1),(0,1)]:
+                        n1 = (x+dx, y+dy)
+                        n2 = (x-dx, y-dy)
+                        def _is_att(p):
+                            px, py = p
+                            return 0 <= px < dim and 0 <= py < dim and st[px, py, A_DIM] == 1
+                        if 0 <= n1[0] < dim and 0 <= n1[1] < dim and 0 <= n2[0] < dim and 0 <= n2[1] < dim:
+                            # attacker + special on opposite sides
+                            if (_is_att(n1) and is_special(n2)) or (is_special(n1) and _is_att(n2)):
+                                if side == 'defender':
+                                    corrected_scores[i] -= pinch_penalty
+                                else:
+                                    corrected_scores[i] += pinch_penalty
+
+                    # King mobility (rook-like moves until blocked)
+                    def count_rook_moves_from(pos):
+                        px, py = pos
+                        cnt = 0
+                        # four rays
+                        for (dx, dy) in [(-1,0),(1,0),(0,-1),(0,1)]:
+                            nx, ny = px+dx, py+dy
+                            while 0 <= nx < dim and 0 <= ny < dim:
+                                if st[nx, ny].sum() != 0:
+                                    break
+                                cnt += 1
+                                nx += dx
+                                ny += dy
+                        return cnt
+                    mobility = count_rook_moves_from(king_pos)
+                    mobility_weight = 0.02 * shaping_multiplier
+                    low_mobility_penalty = (0.05 * shaping_multiplier) if mobility <= 1 else 0.0
+                    norm = max(dim, 1)
+                    if side == 'defender':
+                        corrected_scores[i] += mobility_weight * (mobility / norm)
+                        corrected_scores[i] -= low_mobility_penalty
+                    else:
+                        corrected_scores[i] -= mobility_weight * (mobility / norm)
+                        corrected_scores[i] += low_mobility_penalty
+
+                    # Progress toward nearest corner
+                    corners = [(0,0),(0,dim-1),(dim-1,0),(dim-1,dim-1)]
+                    kx, ky = king_pos
+                    min_corner_dist = min(abs(kx-cx2)+abs(ky-cy2) for (cx2, cy2) in corners)
+                    max_md = 2*(dim-1)
+                    prog = 1.0 - (min_corner_dist / max_md)
+                    prog_weight = 0.03 * shaping_multiplier
+                    if side == 'defender':
+                        corrected_scores[i] += prog_weight * prog
+                    else:
+                        corrected_scores[i] -= prog_weight * prog
+
+                    # Open lanes to edge (attackers block strongly, defenders partial)
+                    lane_weight = 0.03 * shaping_multiplier
+                    lane_score = 0.0
+                    for (dx, dy) in [(-1,0),(1,0),(0,-1),(0,1)]:
+                        nx, ny = x+dx, y+dy
+                        saw_def = False
+                        blocked = False
+                        while 0 <= nx < dim and 0 <= ny < dim:
+                            if st[nx, ny, A_DIM] == 1:
+                                blocked = True
+                                break
+                            if st[nx, ny, D_DIM] == 1:
+                                saw_def = True
+                            nx += dx
+                            ny += dy
+                        if not blocked:
+                            lane_score += 0.5 if saw_def else 1.0
+                    lane_score /= 4.0
+                    if side == 'defender':
+                        corrected_scores[i] += lane_weight * lane_score
+                    else:
+                        corrected_scores[i] -= lane_weight * lane_score
+
+                    # Defender shielding: first piece in each direction is defender (before any attacker)
+                    shield_weight = 0.02 * shaping_multiplier
+                    shields = 0
+                    for (dx, dy) in [(-1,0),(1,0),(0,-1),(0,1)]:
+                        nx, ny = x+dx, y+dy
+                        first = None
+                        while 0 <= nx < dim and 0 <= ny < dim:
+                            if st[nx, ny].sum() != 0:
+                                first = (nx, ny)
+                                break
+                            nx += dx
+                            ny += dy
+                        if first is not None and st[first[0], first[1], D_DIM] == 1:
+                            shields += 1
+                    if side == 'defender':
+                        corrected_scores[i] += shield_weight * shields
+                    else:
+                        corrected_scores[i] -= shield_weight * shields
+
+                    # Self-pin overcrowding penalty (3 or 4 adjacent defenders)
+                    if adj_def >= 3:
+                        self_pin_penalty = 0.05 * shaping_multiplier
+                        if side == 'defender':
+                            corrected_scores[i] -= self_pin_penalty
+                        else:
+                            corrected_scores[i] += self_pin_penalty
+
+                    # Center (throne) occupancy penalty increasing over time
+                    if king_pos == (cx, cy):
+                        # Later plies get stronger penalty
+                        total_len = float(len(corrected_scores))
+                        progress = 1.0 - (position / max(total_len, 1.0))
+                        throne_penalty = (0.07 * shaping_multiplier) * progress
+                        if side == 'defender':
+                            corrected_scores[i] -= throne_penalty
+                        else:
+                            corrected_scores[i] += throne_penalty
+
+                    # Threat accumulation extra penalties
+                    if adj_att >= 2:
+                        extra = 0.05 * shaping_multiplier
+                        if side == 'defender':
+                            corrected_scores[i] -= extra
+                        else:
+                            corrected_scores[i] += extra
+                    if adj_att >= 3:
+                        extra2 = 0.10 * shaping_multiplier
+                        if side == 'defender':
+                            corrected_scores[i] -= extra2
+                        else:
+                            corrected_scores[i] += extra2
+
+                    # Clamp total shaping change per state
+                    _delta = corrected_scores[i] - _before
+                    clamp = 0.3 * shaping_multiplier if shaping_multiplier < 1.0 else 0.3
+                    if _delta > clamp:
+                        corrected_scores[i] = _before + clamp
+                    elif _delta < -clamp:
+                        corrected_scores[i] = _before - clamp
+            except Exception:
+                pass
         
         # Add small positive reward for maintaining advantage, scaled by final magnitude
         if final_outcome > 0 and corrected_scores[i] > 0:
@@ -1087,12 +1308,16 @@ def update_model(model, states, rewards, batch_size=32, learning_rate=None, log_
 @click.option('-v', '--version', default=7, help='Model version number')
 @click.option('--initial-lr', default=0.001, help='Initial learning rate for model training')
 @click.option('-ld/-nld', '--lr-decay/--no-lr-decay', default=False, help='Enable learning rate decay during training')
-@click.option('--epsilon', default=0.1, type=float, help='Probability of taking a random move (epsilon-greedy, 0.0 to 1.0)')
+@click.option('--epsilon', default=0.1, type=float, help='Default random move probability for both sides (0.0 to 1.0)')
+@click.option('--epsilon-attacker', default=None, type=float, help='Attacker random move probability (overrides --epsilon)')
+@click.option('--epsilon-defender', default=None, type=float, help='Defender random move probability (overrides --epsilon)')
 @click.option('--log-level', default=0, type=int, help='Log verbosity: 0=minimal, 1=normal, 2=debug')
+@click.option('--shaping-decay-k', default=20000.0, type=float, help='Exponential decay constant k for shaping: exp(-games/k). Set 0 to disable.')
+@click.option('--shaping-scale', default=0.7, type=float, help='Multiplier applied to shaping when matchup is balanced (40%-60% attacker win rate).')
 def main(game_name, human_attacker, human_defender, interactive, train_attacker, train_defender, dynamic_train,
          cache_model_every, exit_after_cache, use_symmetry,
          attacker_load, defender_load, stats_load, load_latest, version,
-         initial_lr, lr_decay, epsilon, log_level):
+         initial_lr, lr_decay, epsilon, epsilon_attacker, epsilon_defender, log_level, shaping_decay_k, shaping_scale):
     """Main training loop."""
 
     global king_is_special
@@ -1234,10 +1459,19 @@ def main(game_name, human_attacker, human_defender, interactive, train_attacker,
 
         attacker_temp = 0.1
         defender_temp = 0.1
+
+        # Balance adjustment multiplier for shaping based on matchup balance
+        # Use attacker win rate adjusted with draws counting half
+        balance_mult = shaping_scale if 0.40 <= a_win_rate <= 0.60 else 1.0
+
+        # Resolve per-side epsilon (fallback to global epsilon if not provided)
+        epsilon_a = epsilon if epsilon_attacker is None else epsilon_attacker
+        epsilon_d = epsilon if epsilon_defender is None else epsilon_defender
+
         play, a_game_states, a_corrected_scores, d_game_states, d_corrected_scores = \
             run_game(attacker_model, defender_model, human_attacker, human_defender, screen, game_name,
                      sample_frac, attacker_temp, defender_temp, frac_attackers_to_remove, frac_defenders_to_remove, 
-                     epsilon=epsilon, log_level=log_level)
+                     epsilon_attacker=epsilon_a, epsilon_defender=epsilon_d, log_level=log_level)
 
         end = timer()
         game_duration = end - start
@@ -1267,7 +1501,13 @@ def main(game_name, human_attacker, human_defender, interactive, train_attacker,
                 print("\nTraining attacker model:")
                 print("""Last Attacker states: {}""".format(
                       ' '.join(['{:+0.4f}'.format(entry) for entry in a_corrected_scores[-15:]])))
-            smooth_corrected_scores_exp(a_corrected_scores)
+            # Compute per-side shaping scale with exponential decay and balance adjustment
+            games_a = num_train_games_attacker
+            if shaping_decay_k and shaping_decay_k > 0:
+                anneal_a = math.exp(-float(games_a) / float(shaping_decay_k))
+            else:
+                anneal_a = 1.0
+            smooth_corrected_scores_exp(a_corrected_scores, game_states=a_game_states, side='attacker', dynamic=True, decay_constant=5., shaping_multiplier=anneal_a * balance_mult)
             if log_level>0:
                 print("""            Smoothed: {}""".format(
                       ' '.join(['{:+0.4f}'.format(entry) for entry in a_corrected_scores[-15:]])))
@@ -1291,7 +1531,13 @@ def main(game_name, human_attacker, human_defender, interactive, train_attacker,
                 print("\nTraining defender model:")
                 print("""Last Defender states: {}""".format(
                       ' '.join(['{:+0.4f}'.format(entry) for entry in d_corrected_scores[-15:]])))
-            smooth_corrected_scores_exp(d_corrected_scores)
+            games_d = num_train_games_defender
+            if shaping_decay_k and shaping_decay_k > 0:
+                anneal_d = math.exp(-float(games_d) / float(shaping_decay_k))
+            else:
+                anneal_d = 1.0
+            # The same adjusted win rate works to detect balance; apply the same balance multiplier
+            smooth_corrected_scores_exp(d_corrected_scores, game_states=d_game_states, side='defender', dynamic=True, decay_constant=5., shaping_multiplier=anneal_d * balance_mult)
             if log_level>0:
                 print("""            Smoothed: {}""".format(
                 ' '.join(['{:+0.4f}'.format(entry) for entry in d_corrected_scores[-15:]])))

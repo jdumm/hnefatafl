@@ -1,6 +1,10 @@
 from keras import Model, Input
 from keras.layers import Dense, Activation, Dropout, Conv2D, Flatten, Add, Concatenate, BatchNormalization
-from keras.optimizers import Adam
+try:
+    print("Using legacy Adam")
+    from tensorflow.keras.optimizers.legacy import Adam
+except Exception:
+    from tensorflow.keras.optimizers import Adam
 from keras.initializers import TruncatedNormal
 from tensorflow.keras.regularizers import l2
 
