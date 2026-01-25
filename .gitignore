@@ -12,3 +12,6 @@ __pycache__/
 example_notebooks/*
 .idea
 gcp-cmds.txt
+.venv
+*.log
+*~

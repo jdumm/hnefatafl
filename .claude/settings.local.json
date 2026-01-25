@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python:*)",
+      "Bash(python3:*)",
+      "Bash(where:*)",
+      "Bash(vim --version:*)",
+      "Bash(py:*)",
+      "WebFetch(domain:cloud.githubusercontent.com)",
+      "Bash(find:*)",
+      "Bash(bash:*)",
+      "Bash(git checkout:*)"
+    ]
+  }
+}
