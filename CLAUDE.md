@@ -132,7 +132,9 @@ All models:
 - **Batch Normalization**: `--batchnorm` (default) adds BatchNorm layers for training stability
 - **Enhanced Encoding**: `--enhanced-encoding` uses 6-channel input with board feature awareness
 - **Dynamic Training**: `--dynamic-train` pauses defender training when attacker win rate is lopsided
-- **Symmetry**: `--use-symmetry` trains on board rotations/reflections for data augmentation
+- **Symmetry**: Two mutually exclusive options for data augmentation:
+  - `--use-symmetry`: Expands each state into 8 copies (4 rotations × 2 mirrors) - increases batch size 8x
+  - `--probabilistic-symmetry`: Applies one random transform per state - same batch size, less correlated samples (recommended for new training runs)
 
 ### Game Variants
 The `--game-name` parameter supports:

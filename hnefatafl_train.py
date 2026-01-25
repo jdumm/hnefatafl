@@ -920,6 +920,25 @@ def expand_game_states_symmetries(game_states):
     return game_states
 
 
+def apply_random_symmetry(game_state):
+    """Apply one random symmetry transform to a game state.
+
+    Compatible with both legacy 3-channel and enhanced 6-channel encoding.
+    Works because corners stay at corners and center stays at center
+    under any rotation/mirror of the board.
+    """
+    k = random.randint(0, 3)  # 0, 1, 2, or 3 rotations of 90 degrees
+    state = np.rot90(game_state, k)
+    if random.random() < 0.5:  # 50% chance to mirror
+        state = np.flip(state, axis=0)
+    return state
+
+
+def apply_random_symmetries_to_batch(game_states):
+    """Apply independent random symmetry to each state in a batch."""
+    return np.array([apply_random_symmetry(gs) for gs in game_states])
+
+
 def smooth_corrected_scores(corrected_scores, num_to_smooth=50):
     """ Smooth out the lead up to the final state for faster learning.
         I tried a number of strategies for speeding up training...
@@ -1139,7 +1158,9 @@ def initialize_compact_model_simple(num_channels=3):
 @click.option('-c', '--cache-model-every', default=100, help='Cache the Keras DNN model every so many games')
 @click.option('-e/-ne', '--exit-after-cache/--no-exit-after-cache', default=False, help='Exit after model cache step to allow restart')
 @click.option('-s/-ns', '--use-symmetry/--no-symmetry', default=False,
-              help='Set to train using symmetrical board states')
+              help='Set to train using symmetrical board states (8x expansion)')
+@click.option('--probabilistic-symmetry/--no-probabilistic-symmetry', default=False,
+              help='Apply random symmetry transform to each state (alternative to --use-symmetry)')
 @click.option('-al', '--attacker-load', default=0, help='Attacker model file num to load')
 @click.option('-dl', '--defender-load', default=0, help='Defender model file num to load')
 @click.option('-sl', '--stats-load', default=0, help='Stats model file num to load')
@@ -1158,7 +1179,7 @@ def initialize_compact_model_simple(num_channels=3):
 @click.option('--legacy-encoding/--enhanced-encoding', default=True, help='Use legacy 3-channel encoding (default) or enhanced 6-channel')
 @click.option('--batchnorm/--no-batchnorm', default=True, help='Use batch normalization in model (default: True)')
 def main(game_name, human_attacker, human_defender, interactive, train_attacker, train_defender, dynamic_train,
-         cache_model_every, exit_after_cache, use_symmetry,
+         cache_model_every, exit_after_cache, use_symmetry, probabilistic_symmetry,
          attacker_load, defender_load, stats_load, load_latest, version,
          use_td, gamma, initial_temp, final_temp, temp_decay,
          initial_epsilon, final_epsilon, epsilon_decay, benchmark, legacy_encoding, batchnorm):
@@ -1175,6 +1196,15 @@ def main(game_name, human_attacker, human_defender, interactive, train_attacker,
         print(f"Using enhanced 6-channel encoding (corners, center, turn indicator)")
     else:
         print(f"Using legacy 3-channel encoding")
+
+    # Warn if both symmetry options are enabled
+    if use_symmetry and probabilistic_symmetry:
+        print("Warning: Both --use-symmetry and --probabilistic-symmetry are enabled.")
+        print("         Using --use-symmetry (8x expansion). Disable one for clarity.")
+    elif probabilistic_symmetry:
+        print("Using probabilistic symmetry augmentation (random transform per state)")
+    elif use_symmetry:
+        print("Using deterministic symmetry augmentation (8x expansion)")
 
     log_level = 1
 
@@ -1371,9 +1401,15 @@ def main(game_name, human_attacker, human_defender, interactive, train_attacker,
 
             # Convert to numpy arrays without shuffling
             a_game_states = np.array(a_game_states)
+
+            # Symmetry augmentation (mutually exclusive options)
             if use_symmetry:
                 a_game_states = expand_game_states_symmetries(a_game_states)
                 a_targets = np.tile(a_targets, 8)
+            elif probabilistic_symmetry:
+                a_game_states = apply_random_symmetries_to_batch(a_game_states)
+                # targets unchanged - same size batch
+
             update_model(attacker_model, a_game_states, a_targets, use_td=use_td, gamma=gamma)
 
         if train_defender and defender_model is not None and len(d_corrected_scores) > 0:
@@ -1398,9 +1434,15 @@ def main(game_name, human_attacker, human_defender, interactive, train_attacker,
 
             # Convert to numpy arrays without shuffling
             d_game_states = np.array(d_game_states)
+
+            # Symmetry augmentation (mutually exclusive options)
             if use_symmetry:
                 d_game_states = expand_game_states_symmetries(d_game_states)
                 d_targets = np.tile(d_targets, 8)
+            elif probabilistic_symmetry:
+                d_game_states = apply_random_symmetries_to_batch(d_game_states)
+                # targets unchanged - same size batch
+
             update_model(defender_model, d_game_states, d_targets, use_td=use_td, gamma=gamma)
 
         if (stats.num_games_total() % cache_model_every == 0):  # Save every cache_model_every games
