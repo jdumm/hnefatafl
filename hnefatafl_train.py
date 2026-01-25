@@ -636,7 +636,7 @@ def do_best_move(move, model, game_state_cache, sample_frac=1.0, screen=None, bo
         sys.exit(1)
 
 
-def initialize_random_cnn_model_3d_sonnet(num_channels=3, use_batchnorm=True):
+def initialize_random_cnn_model_3d_sonnet(num_channels=3, use_batchnorm=True, learning_rate=0.001):
     """ Initialize Keras CNN model optimized for 7x7 board game learning.
 
     Architecture features:
@@ -724,9 +724,10 @@ def initialize_random_cnn_model_3d_sonnet(num_channels=3, use_batchnorm=True):
 
     model = Model(inputs=inputs, outputs=x)
 
-    optimizer = Adam(learning_rate=0.001)  # Keep learning rate moderate
+    optimizer = Adam(learning_rate=learning_rate)
     model.compile(optimizer=optimizer, loss='mean_squared_error')
 
+    print(f"Model initialized with learning_rate={learning_rate}")
     model.summary()
     return model
 
@@ -1102,7 +1103,7 @@ def update_model(model, states, rewards, batch_size=32, use_td=False, gamma=0.95
     return history
 
 
-def initialize_compact_model_simple(num_channels=3):
+def initialize_compact_model_simple(num_channels=3, learning_rate=0.001):
     """ Initialize an extremely compact model specifically for 5x5 simple game mode.
     The model focuses purely on spatial relationships between pieces, particularly
     the relative positions of attacker vs king and potential blocking positions.
@@ -1136,11 +1137,11 @@ def initialize_compact_model_simple(num_channels=3):
               kernel_initializer=TruncatedNormal(mean=0.0, stddev=std))(x)
     
     model = Model(inputs=inputs, outputs=x)
-    
-    # Higher learning rate for faster adaptation
-    optimizer = Adam(learning_rate=0.01)
+
+    optimizer = Adam(learning_rate=learning_rate)
     model.compile(optimizer=optimizer, loss='mean_squared_error')
-    
+
+    print(f"Model initialized with learning_rate={learning_rate}")
     model.summary()
     return model
 
@@ -1178,11 +1179,12 @@ def initialize_compact_model_simple(num_channels=3):
 @click.option('--benchmark/--no-benchmark', default=False, help='Output timing statistics')
 @click.option('--legacy-encoding/--enhanced-encoding', default=True, help='Use legacy 3-channel encoding (default) or enhanced 6-channel')
 @click.option('--batchnorm/--no-batchnorm', default=True, help='Use batch normalization in model (default: True)')
+@click.option('--learning-rate', default=0.001, help='Learning rate for optimizer (try 0.0001 if models saturate)')
 def main(game_name, human_attacker, human_defender, interactive, train_attacker, train_defender, dynamic_train,
          cache_model_every, exit_after_cache, use_symmetry, probabilistic_symmetry,
          attacker_load, defender_load, stats_load, load_latest, version,
          use_td, gamma, initial_temp, final_temp, temp_decay,
-         initial_epsilon, final_epsilon, epsilon_decay, benchmark, legacy_encoding, batchnorm):
+         initial_epsilon, final_epsilon, epsilon_decay, benchmark, legacy_encoding, batchnorm, learning_rate):
     """Main training loop."""
 
     global king_is_special
@@ -1263,14 +1265,15 @@ def main(game_name, human_attacker, human_defender, interactive, train_attacker,
                 attacker_load = 0
         if attacker_load == 0:
             if game_name.lower() == "simple":
-                attacker_model = initialize_compact_model_simple(num_channels=num_channels)
+                attacker_model = initialize_compact_model_simple(num_channels=num_channels, learning_rate=learning_rate)
             else:
-                attacker_model = initialize_random_cnn_model_3d_sonnet(num_channels=num_channels, use_batchnorm=batchnorm)
+                attacker_model = initialize_random_cnn_model_3d_sonnet(num_channels=num_channels, use_batchnorm=batchnorm, learning_rate=learning_rate)
         else:
             attacker_model = load_model('{}/attacker_model_{}_games.keras'.format(save_dir, attacker_load))
             # Recompile with fresh optimizer
-            optimizer = Adam(learning_rate=0.001)
+            optimizer = Adam(learning_rate=learning_rate)
             attacker_model.compile(optimizer=optimizer, loss='mean_squared_error')
+            print(f"Attacker model reloaded with learning_rate={learning_rate}")
             num_train_games_attacker = attacker_load
 
     defender_model = None
@@ -1285,14 +1288,15 @@ def main(game_name, human_attacker, human_defender, interactive, train_attacker,
             defender_model = None  # Defaults to mostly random + some extra King movements
         elif defender_load == 0:
             if game_name.lower() == "simple":
-                defender_model = initialize_compact_model_simple(num_channels=num_channels)
+                defender_model = initialize_compact_model_simple(num_channels=num_channels, learning_rate=learning_rate)
             else:
-                defender_model = initialize_random_cnn_model_3d_sonnet(num_channels=num_channels, use_batchnorm=batchnorm)
+                defender_model = initialize_random_cnn_model_3d_sonnet(num_channels=num_channels, use_batchnorm=batchnorm, learning_rate=learning_rate)
         else:
             defender_model = load_model('{}/defender_model_{}_games.keras'.format(save_dir, defender_load))
             # Recompile with fresh optimizer
-            optimizer = Adam(learning_rate=0.001)
+            optimizer = Adam(learning_rate=learning_rate)
             defender_model.compile(optimizer=optimizer, loss='mean_squared_error')
+            print(f"Defender model reloaded with learning_rate={learning_rate}")
             num_train_games_defender = defender_load
 
     stats = None
