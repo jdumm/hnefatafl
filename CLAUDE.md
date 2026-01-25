@@ -139,11 +139,17 @@ All models:
 ### Game Variants
 The `--game-name` parameter supports:
 - `Hnefatafl`: Classic 11x11 board
-- `Brandubh`: 7x7 Irish variant
+- `Brandubh`: 7x7 Irish variant (note: inherently favors attackers ~80% win rate)
 - `simple`: Minimal 5x5 test variant
 - `brandubh_simple`: Simplified 7x7 for testing
 
 Each variant has different initial piece layouts and board dimensions configured in Board.__init__().
+
+### Game Balance Notes
+- **Brandubh** is known to favor attackers. Expect ~80% attacker win rate even with well-trained models. Training strategies to address this:
+  - Use `--dynamic-train` to pause attacker training when win rate is lopsided
+  - Consider asymmetric learning rates (higher for defender)
+  - The 7x7 board gives king fewer escape routes than larger variants
 
 ## Known Issues / Notes
 
