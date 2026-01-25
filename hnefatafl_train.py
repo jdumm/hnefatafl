@@ -303,6 +303,11 @@ def run_game(attacker_model=None, defender_model=None, human_attacker=False, hum
             tafl.Attackers.sprites()[0].kill()
         else:
             tafl.Attackers.sprites()[1].kill()
+
+    # Print initial board state in interactive mode
+    if screen is not None:
+        print_board_state(move, turn_num=0, extra_info=f"Game started: {game_name}")
+
     a_game_states = []
     a_predicted_scores = []
     d_game_states = []
@@ -329,32 +334,34 @@ def run_game(attacker_model=None, defender_model=None, human_attacker=False, hum
             if log_level > 0:
                 print(text)
             text2 = "Play again? y/n"
-            
+
             # Replace last predictions with win/loss values
             if len(a_predicted_scores) > 0:
                 a_predicted_scores[-1] = LOSS_REWARD
             if len(d_predicted_scores) > 0:
                 d_predicted_scores[-1] = WIN_REWARD
-                
+
             if screen:
+                print_board_state(move, turn_num=num_moves, extra_info="GAME OVER: All attackers eliminated! Defenders win!")
                 tafl.update_image(screen, board, move, text, text2)
                 pygame.display.flip()
             if human_attacker or human_defender: play = end_game_loop(move)
             return play, a_game_states, a_predicted_scores, d_game_states, d_predicted_scores
-            
+
         if len(tafl.Defenders.sprites()) == 0:
             text = "--- All defenders eliminated! Attackers win!"
             if log_level > 0:
                 print(text)
             text2 = "Play again? y/n"
-            
+
             # Replace last predictions with win/loss values
             if len(a_predicted_scores) > 0:
                 a_predicted_scores[-1] = WIN_REWARD
             if len(d_predicted_scores) > 0:
                 d_predicted_scores[-1] = LOSS_REWARD
-                
+
             if screen:
+                print_board_state(move, turn_num=num_moves, extra_info="GAME OVER: All defenders eliminated! Attackers win!")
                 tafl.update_image(screen, board, move, text, text2)
                 pygame.display.flip()
             if human_attacker or human_defender: play = end_game_loop(move)
@@ -374,11 +381,12 @@ def run_game(attacker_model=None, defender_model=None, human_attacker=False, hum
                 d_predicted_scores[-1] = LOSS_REWARD
                 
             if screen:
+                print_board_state(move, turn_num=num_moves, extra_info="GAME OVER: King killed! Attackers win!")
                 tafl.update_image(screen, board, move, text, text2)
                 pygame.display.flip()
             if human_attacker or human_defender: play = end_game_loop(move)
             return play, a_game_states, a_predicted_scores, d_game_states, d_predicted_scores
-            
+
         if num_moves >= 100 or (game_name.lower() == "simple" and num_moves > 4):
             if log_level > 0:
                 print("--- Draw game after {} moves".format(num_moves))
@@ -387,6 +395,8 @@ def run_game(attacker_model=None, defender_model=None, human_attacker=False, hum
                 a_predicted_scores[-1] = DRAW_REWARD  # Slight penalty for draws
             if len(d_predicted_scores) > 0:
                 d_predicted_scores[-1] = DRAW_REWARD  # Slight penalty for draws
+            if screen:
+                print_board_state(move, turn_num=num_moves, extra_info=f"GAME OVER: Draw after {num_moves} moves")
             return play, a_game_states, a_predicted_scores, d_game_states, d_predicted_scores
 
         if move.a_turn:
@@ -433,13 +443,14 @@ def run_game(attacker_model=None, defender_model=None, human_attacker=False, hum
                             if log_level > 0:
                                 print(text)
                             text2 = "Play again? y/n"
-                            
+
                             # Replace last predictions with win/loss values
                             a_predicted_scores[-1] = WIN_REWARD
                             if len(d_predicted_scores) > 0:
                                 d_predicted_scores[-1] = LOSS_REWARD
-                                
+
                             if screen:
+                                print_board_state(move, turn_num=num_moves, extra_info="GAME OVER: King killed! Attackers win!")
                                 tafl.update_image(screen, board, move, text, text2)
                                 pygame.display.flip()
                             if human_attacker or human_defender: play = end_game_loop(move)
@@ -479,14 +490,15 @@ def run_game(attacker_model=None, defender_model=None, human_attacker=False, hum
                 if log_level > 0:
                     print(text)
                 text2 = "Play again? y/n"
-                
+
                 # Replace last predictions with win/loss values
                 if len(a_predicted_scores) > 0:
-                    a_predicted_scores[-1] = WIN_REWARD 
+                    a_predicted_scores[-1] = WIN_REWARD
                 if len(d_predicted_scores) > 0:
                     d_predicted_scores[-1] = LOSS_REWARD
-                    
+
                 if screen:
+                    print_board_state(move, turn_num=num_moves, extra_info="GAME OVER: King killed! Attackers win!")
                     tafl.update_image(screen, board, move, text, text2)
                     pygame.display.flip()
                 if human_attacker or human_defender: play = end_game_loop(move)
@@ -535,13 +547,14 @@ def run_game(attacker_model=None, defender_model=None, human_attacker=False, hum
                             if log_level > 0:
                                 print(text)
                             text2 = "Play again? y/n"
-                            
+
                             # Replace last predictions with win/loss values
                             if len(a_predicted_scores) > 0:
                                 a_predicted_scores[-1] = LOSS_REWARD
                             d_predicted_scores[-1] = WIN_REWARD
-                                
+
                             if screen:
+                                print_board_state(move, turn_num=num_moves, extra_info="GAME OVER: King escaped! Defenders win!")
                                 tafl.update_image(screen, board, move, text, text2)
                                 pygame.display.flip()
                             if human_attacker or human_defender: play = end_game_loop(move)
@@ -581,14 +594,15 @@ def run_game(attacker_model=None, defender_model=None, human_attacker=False, hum
                 if log_level > 0:
                     print(text)
                 text2 = "Play again? y/n"
-                
+
                 # Replace last predictions with win/loss values
                 if len(a_predicted_scores) > 0:
                     a_predicted_scores[-1] = LOSS_REWARD
                 if len(d_predicted_scores) > 0:
                     d_predicted_scores[-1] = WIN_REWARD
-                    
+
                 if screen:
+                    print_board_state(move, turn_num=num_moves, extra_info="GAME OVER: King escaped! Defenders win!")
                     tafl.update_image(screen, board, move, text, text2)
                     pygame.display.flip()
                 if human_attacker or human_defender: play = end_game_loop(move)
@@ -636,6 +650,9 @@ def do_human_turn(screen, board, move):
                     move.restart = True
                     move.a_turn = not move.a_turn
                     tafl.Current.empty()
+                if event.key == pygame.K_p:
+                    # Print board state on demand when 'P' key is pressed
+                    print_board_state(move, extra_info="Board state requested by user (P key)")
             if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                 pos = pygame.mouse.get_pos()
                 if move.game_over:
@@ -686,6 +703,9 @@ def do_human_turn(screen, board, move):
         pygame.display.flip()
 
         if current_turn != move.a_turn:  # turn ended
+            # Print board state after human move
+            player = "Attacker" if current_turn else "Defender"
+            print_board_state(move, extra_info=f"{player} completed their move")
             return True
 
 
@@ -953,17 +973,107 @@ def game_state_to_3d_array():
     return arr
 
 
-def game_state_3d_to_string():
+def get_board_text(include_labels=True):
     """ 2D string representation of game state for us humans.
+        Shows pieces (a/d/K) and special squares (x/c) when empty.
+
+        Args:
+            include_labels: If True, adds row/column coordinate labels
+
+        Returns:
+            String representation of the board with optional labels
     """
     if tafl.Attackers is None or tafl.Defenders is None or tafl.Kings is None:
         print("Game not properly initialized.  Exiting.")
         sys.exit(1)
-    #grid = ['.'*tafl.DIM+'\n']*tafl.DIM
-    s = ['.' * tafl.DIM] * tafl.DIM
-    grid = []
-    for l in s:
-        grid.append(list(l))
+
+    # Initialize grid with empty squares
+    grid = [['.' for _ in range(tafl.DIM)] for _ in range(tafl.DIM)]
+
+    # Mark special squares (corners and center throne) when empty
+    center_pos = (tafl.DIM // 2, tafl.DIM // 2)
+    for (row, col) in tafl.SPECIALSQS:
+        if (row, col) == center_pos:
+            grid[row][col] = 'c'  # center throne
+        else:
+            grid[row][col] = 'x'  # corners
+
+    # Place pieces (pieces override special squares)
+    # Note: King inherits from Defender, so we need to place king last to avoid overwriting
+    for p in tafl.Attackers:
+        grid[p.x_tile][p.y_tile] = 'a'
+    for p in tafl.Defenders:
+        # Skip if this defender is the king (will be placed separately)
+        if p not in tafl.Kings:
+            grid[p.x_tile][p.y_tile] = 'd'
+    for p in tafl.Kings:
+        grid[p.x_tile][p.y_tile] = 'K'  # Capital K for king (more visible)
+
+    # Format output
+    if include_labels:
+        lines = []
+        # Column header
+        header = "  " + " ".join(str(i) for i in range(tafl.DIM))
+        lines.append(header)
+        # Rows with row numbers
+        for row_idx, row in enumerate(grid):
+            row_str = str(row_idx) + " " + " ".join(row)
+            lines.append(row_str)
+        return "\n".join(lines)
+    else:
+        # Return grid without labels
+        return "\n".join(" ".join(row) for row in grid)
+
+
+def print_board_state(move=None, turn_num=None, extra_info=""):
+    """ Print formatted board state to console with metadata.
+
+        Args:
+            move: Optional Move object to determine current player
+            turn_num: Optional turn number to display
+            extra_info: Optional additional information to display
+    """
+    print("\n" + "=" * 40)
+    print("GAME STATE")
+    print("=" * 40)
+
+    # Print metadata if available
+    metadata_parts = []
+    if turn_num is not None:
+        metadata_parts.append(f"Turn: {turn_num}")
+    if move is not None:
+        current_player = "Attacker" if move.a_turn else "Defender"
+        metadata_parts.append(f"Current: {current_player}")
+
+    # Piece counts
+    num_attackers = len(tafl.Attackers.sprites())
+    num_defenders = len(tafl.Defenders.sprites())
+    num_kings = len(tafl.Kings.sprites())
+    metadata_parts.append(f"Attackers: {num_attackers}")
+    metadata_parts.append(f"Defenders: {num_defenders}")
+    metadata_parts.append(f"King: {num_kings}")
+
+    if metadata_parts:
+        print(" | ".join(metadata_parts))
+        print()
+
+    if extra_info:
+        print(extra_info)
+        print()
+
+    # Print the board
+    print(get_board_text(include_labels=True))
+    print("=" * 40 + "\n")
+
+
+def game_state_3d_to_string():
+    """ Legacy function for backward compatibility.
+    """
+    if tafl.Attackers is None or tafl.Defenders is None or tafl.Kings is None:
+        print("Game not properly initialized.  Exiting.")
+        sys.exit(1)
+    # Return old format (list of lists) for backward compatibility
+    grid = [['.' for _ in range(tafl.DIM)] for _ in range(tafl.DIM)]
     for p in tafl.Attackers:
         grid[p.x_tile][p.y_tile] = 'a'
     for p in tafl.Kings:
@@ -1369,11 +1479,29 @@ def main(game_name, human_attacker, human_defender, interactive, train_attacker,
 
     stats_tracker_loaded = False
     attacker_model = None
+    attacker_file = None
     if not human_attacker:
         if load_latest:
-            a_model_files = glob(save_dir + '/attacker_model_*_games.keras')
+            # Look for both .keras and .h5 files
+            a_model_files = glob(save_dir + '/attacker_model_*_games.*')
             if len(a_model_files) > 0:
-                attacker_load = max([int(f.split("_")[4]) for f in a_model_files])  # Parse filenames and get latest
+                # Parse filenames to extract game numbers
+                game_numbers = []
+                for f in a_model_files:
+                    parts = os.path.basename(f).split("_")
+                    # Find the number before "games"
+                    for i, part in enumerate(parts):
+                        if part == "games" or part.startswith("games."):
+                            try:
+                                num = int(parts[i-1])
+                                game_numbers.append((num, f))
+                                break
+                            except (ValueError, IndexError):
+                                pass
+                if game_numbers:
+                    attacker_load, attacker_file = max(game_numbers, key=lambda x: x[0])
+                else:
+                    attacker_load = 0
             else:
                 attacker_load = 0
         if attacker_load == 0:
@@ -1382,18 +1510,40 @@ def main(game_name, human_attacker, human_defender, interactive, train_attacker,
             else:
                 attacker_model = sonnet_model(tafl.DIM, learning_rate=initial_lr)
         else:
-            attacker_model = load_model('{}/attacker_model_{}_games.keras'.format(save_dir, attacker_load))
+            # Load from found file or use standard naming
+            if attacker_file:
+                attacker_model = load_model(attacker_file)
+            else:
+                attacker_model = load_model('{}/attacker_model_{}_games.keras'.format(save_dir, attacker_load))
             # Recompile with fresh optimizer
             optimizer = Adam(learning_rate=initial_lr)
             attacker_model.compile(optimizer=optimizer, loss='mean_squared_error')
             num_train_games_attacker = attacker_load
 
     defender_model = None
+    defender_file = None
     if not human_defender:
         if load_latest:
-            d_model_files = glob(save_dir + '/defender_model_*_games.keras')
+            # Look for both .keras and .h5 files
+            d_model_files = glob(save_dir + '/defender_model_*_games.*')
             if len(d_model_files) > 0:
-                defender_load = max([int(f.split("_")[4]) for f in d_model_files])  # Parse filenames and get latest
+                # Parse filenames to extract game numbers
+                game_numbers = []
+                for f in d_model_files:
+                    parts = os.path.basename(f).split("_")
+                    # Find the number before "games"
+                    for i, part in enumerate(parts):
+                        if part == "games" or part.startswith("games."):
+                            try:
+                                num = int(parts[i-1])
+                                game_numbers.append((num, f))
+                                break
+                            except (ValueError, IndexError):
+                                pass
+                if game_numbers:
+                    defender_load, defender_file = max(game_numbers, key=lambda x: x[0])
+                else:
+                    defender_load = 0
             else:
                 defender_load = 0
         if defender_load == -1:
@@ -1404,7 +1554,11 @@ def main(game_name, human_attacker, human_defender, interactive, train_attacker,
             else:
                 defender_model = sonnet_model(tafl.DIM, learning_rate=initial_lr)
         else:
-            defender_model = load_model('{}/defender_model_{}_games.keras'.format(save_dir, defender_load))
+            # Load from found file or use standard naming
+            if defender_file:
+                defender_model = load_model(defender_file)
+            else:
+                defender_model = load_model('{}/defender_model_{}_games.keras'.format(save_dir, defender_load))
             # Recompile with fresh optimizer
             optimizer = Adam(learning_rate=initial_lr)
             defender_model.compile(optimizer=optimizer, loss='mean_squared_error')
@@ -1414,7 +1568,23 @@ def main(game_name, human_attacker, human_defender, interactive, train_attacker,
     if load_latest:
         stats_files = glob(save_dir + '/StatsTracker_*_games.pkl')
         if len(stats_files) > 0:
-            stats_load = max([int(f.split("_")[3]) for f in stats_files])
+            # Parse filenames to extract game numbers
+            game_numbers = []
+            for f in stats_files:
+                parts = os.path.basename(f).split("_")
+                # Find the number before "games"
+                for i, part in enumerate(parts):
+                    if part == "games" or part.startswith("games."):
+                        try:
+                            num = int(parts[i-1])
+                            game_numbers.append(num)
+                            break
+                        except (ValueError, IndexError):
+                            pass
+            if game_numbers:
+                stats_load = max(game_numbers)
+            else:
+                stats_load = 0
         else:
             stats_load = 0
     if stats_load > 0 and (not human_attacker or not human_defender):
