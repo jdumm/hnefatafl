@@ -29,8 +29,8 @@ from keras.models import load_model
 
 import hnefatafl as tafl
 from models import (
-    initialize_residual_multiscale_cnn_model,
-    initialize_compact_model_simple,
+    initialize_model_for_game,
+    resolve_model_preset,
     validate_model_channels,
 )
 from stats_tracker import StatsTracker
@@ -208,7 +208,8 @@ def do_mostly_random_but_strike_to_kill_move(move):
 
 
 def run_game(attacker_model=None, defender_model=None, human_attacker=False, human_defender=False, screen=None,
-             game_name='Hnefatafl', sample_frac=1.0, attacker_temp=0.1, defender_temp=0.1, frac_attackers_to_remove=0, frac_defenders_to_remove=0, epsilon=0.0):
+             game_name='Hnefatafl', sample_frac=1.0, attacker_temp=0.1, defender_temp=0.1,
+             frac_attackers_to_remove=0, frac_defenders_to_remove=0, epsilon=0.0, log_level=1):
     """Start and run one game of computer attacker vs computer defender hnefatafl.
  
        Args:
@@ -252,7 +253,8 @@ def run_game(attacker_model=None, defender_model=None, human_attacker=False, hum
                 if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                     pass
         if num_moves >= 100 or (game_name.lower() == "simple" and num_moves > 4):
-            print("--- Draw game after {} moves".format(num_moves))
+            if log_level >= 2:
+                print("--- Draw game after {} moves".format(num_moves))
             # Replace last predictions with draw values instead of appending
             if len(a_predicted_scores) > 0:
                 a_predicted_scores[-1] = -0.5  # Slight penalty for draws
@@ -311,7 +313,8 @@ def run_game(attacker_model=None, defender_model=None, human_attacker=False, hum
 
         if move.escaped:
             text = "--- King escaped! Defenders win!"
-            print(text)
+            if log_level >= 2:
+                print(text)
             text2 = "Play again? y/n"
             # Scale reward based on number of moves - faster wins get higher rewards
             
@@ -328,7 +331,8 @@ def run_game(attacker_model=None, defender_model=None, human_attacker=False, hum
             return play, a_game_states, a_predicted_scores, d_game_states, d_predicted_scores
         if move.king_killed:
             text = "--- King killed! Attackers win!"
-            print(text)
+            if log_level >= 2:
+                print(text)
             text2 = "Play again? y/n"
             # Scale reward based on number of moves - faster wins get higher rewards
             
@@ -896,7 +900,7 @@ def compute_td_targets(game_states, final_reward, gamma=0.95, model=None):
     return targets
 
 
-def update_model(model, states, rewards, batch_size=32, use_td=False, gamma=0.95):
+def update_model(model, states, rewards, batch_size=32, use_td=False, gamma=0.95, log_level=1):
     """Train the model on a batch of state-reward pairs.
 
     Args:
@@ -913,11 +917,12 @@ def update_model(model, states, rewards, batch_size=32, use_td=False, gamma=0.95
     # Get number of channels from the states shape
     num_channels = states.shape[-1] if len(states.shape) == 4 else get_num_channels()
 
-    # Get predictions before training for last few states
-    num_debug_states = min(3, len(states))
-    debug_states = states[-num_debug_states:]
-    debug_states_reshaped = debug_states.reshape(-1, tafl.DIM, tafl.DIM, num_channels)
-    before_preds = model.predict(debug_states_reshaped, verbose=0)
+    if log_level >= 2:
+        # Get predictions before training for last few states
+        num_debug_states = min(3, len(states))
+        debug_states = states[-num_debug_states:]
+        debug_states_reshaped = debug_states.reshape(-1, tafl.DIM, tafl.DIM, num_channels)
+        before_preds = model.predict(debug_states_reshaped, verbose=0)
 
     # Use smaller batch size for draw games to prevent conflicting gradients
     actual_batch_size = 8 if any(abs(rewards + 0.5) < 0.01) else batch_size
@@ -931,20 +936,21 @@ def update_model(model, states, rewards, batch_size=32, use_td=False, gamma=0.95
         verbose=0
     )
 
-    # Get predictions after training
-    after_preds = model.predict(debug_states_reshaped, verbose=0)
+    if log_level >= 2:
+        # Get predictions after training
+        after_preds = model.predict(debug_states_reshaped, verbose=0)
 
-    # Print debug info
-    print("\nModel prediction changes after training:")
-    print("State | Before  | After   | Target  | Change")
-    print("-" * 45)
-    for i in range(num_debug_states):
-        target = rewards[-num_debug_states + i]
-        before = before_preds[i][0]
-        after = after_preds[i][0]
-        change = after - before
-        direction = "+" if (target > before and after > before) or (target < before and after < before) else "-"
-        print(f"{i:5d} | {before:7.4f} | {after:7.4f} | {target:7.4f} | {change:+7.4f} {direction}")
+        # Print debug info
+        print("\nModel prediction changes after training:")
+        print("State | Before  | After   | Target  | Change")
+        print("-" * 45)
+        for i in range(num_debug_states):
+            target = rewards[-num_debug_states + i]
+            before = before_preds[i][0]
+            after = after_preds[i][0]
+            change = after - before
+            direction = "+" if (target > before and after > before) or (target < before and after < before) else "-"
+            print(f"{i:5d} | {before:7.4f} | {after:7.4f} | {target:7.4f} | {change:+7.4f} {direction}")
 
     return history
 
@@ -982,11 +988,18 @@ def update_model(model, states, rewards, batch_size=32, use_td=False, gamma=0.95
 @click.option('--benchmark/--no-benchmark', default=False, help='Output timing statistics')
 @click.option('--batchnorm/--no-batchnorm', default=True, help='Use batch normalization in model (default: True)')
 @click.option('--learning-rate', default=0.001, help='Learning rate for optimizer (try 0.0001 if models saturate)')
+@click.option('--model-preset', type=click.Choice(['auto', 'simple', 'brandubh', 'hnefatafl'], case_sensitive=False),
+              default='auto', help='Model preset override. Defaults to auto selection from game mode.')
+@click.option('--log-level', default=1, type=click.IntRange(0, 2),
+              help='Logging verbosity: 0=minimal, 1=periodic summaries, 2=per-game debug')
+@click.option('--log-every', default=100, type=click.IntRange(1, 1000000),
+              help='At log-level 1, print summary every N games')
 def main(game_name, human_attacker, human_defender, interactive, train_attacker, train_defender, dynamic_train,
          cache_model_every, exit_after_cache, use_symmetry, probabilistic_symmetry,
          attacker_load, defender_load, stats_load, load_latest, version,
          use_td, gamma, initial_temp, final_temp, temp_decay,
-         initial_epsilon, final_epsilon, epsilon_decay, benchmark, batchnorm, learning_rate):
+         initial_epsilon, final_epsilon, epsilon_decay, benchmark, batchnorm, learning_rate, model_preset,
+         log_level, log_every):
     """Main training loop."""
 
     global king_is_special
@@ -995,6 +1008,8 @@ def main(game_name, human_attacker, human_defender, interactive, train_attacker,
     # Fixed encoding mode
     num_channels = 8
     print("Using fixed 8-channel encoding (corners, center, turn indicator, attacker count, defender count)")
+    effective_preset = resolve_model_preset(game_name, model_preset=model_preset)
+    print(f"Using model preset '{effective_preset}' (requested: {model_preset}, game: {game_name.lower()})")
 
     # Warn if both symmetry options are enabled
     if use_symmetry and probabilistic_symmetry:
@@ -1004,8 +1019,6 @@ def main(game_name, human_attacker, human_defender, interactive, train_attacker,
         print("Using probabilistic symmetry augmentation (random transform per state)")
     elif use_symmetry:
         print("Using deterministic symmetry augmentation (8x expansion)")
-
-    log_level = 1
 
     # True to let human players play
     # human_attacker = False
@@ -1061,10 +1074,13 @@ def main(game_name, human_attacker, human_defender, interactive, train_attacker,
             else:
                 attacker_load = 0
         if attacker_load == 0:
-            if game_name.lower() == "simple":
-                attacker_model = initialize_compact_model_simple(num_channels=num_channels, learning_rate=learning_rate)
-            else:
-                attacker_model = initialize_residual_multiscale_cnn_model(num_channels=num_channels, use_batchnorm=batchnorm, learning_rate=learning_rate)
+            attacker_model = initialize_model_for_game(
+                game_name=game_name,
+                num_channels=num_channels,
+                use_batchnorm=batchnorm,
+                learning_rate=learning_rate,
+                model_preset=effective_preset,
+            )
         else:
             attacker_model = load_model('{}/attacker_model_{}_games.keras'.format(save_dir, attacker_load))
             validate_model_channels(attacker_model, num_channels, "Attacker")
@@ -1085,10 +1101,13 @@ def main(game_name, human_attacker, human_defender, interactive, train_attacker,
         if defender_load == -1:
             defender_model = None  # Defaults to mostly random + some extra King movements
         elif defender_load == 0:
-            if game_name.lower() == "simple":
-                defender_model = initialize_compact_model_simple(num_channels=num_channels, learning_rate=learning_rate)
-            else:
-                defender_model = initialize_residual_multiscale_cnn_model(num_channels=num_channels, use_batchnorm=batchnorm, learning_rate=learning_rate)
+            defender_model = initialize_model_for_game(
+                game_name=game_name,
+                num_channels=num_channels,
+                use_batchnorm=batchnorm,
+                learning_rate=learning_rate,
+                model_preset=effective_preset,
+            )
         else:
             defender_model = load_model('{}/defender_model_{}_games.keras'.format(save_dir, defender_load))
             validate_model_channels(defender_model, num_channels, "Defender")
@@ -1131,7 +1150,7 @@ def main(game_name, human_attacker, human_defender, interactive, train_attacker,
             train_defender = False  # Too smart, pause training
             if a_win_rate < 0.30:  # experimental
                 frac_defenders_to_remove = 0.50 - a_win_rate
-                if log_level>0:
+                if log_level >= 2:
                     print(f"a_win_rate is {a_win_rate}, removing {frac_defenders_to_remove} of defenders")
         else:
             train_defender = train_defender_orig
@@ -1140,7 +1159,7 @@ def main(game_name, human_attacker, human_defender, interactive, train_attacker,
             train_attacker = False  # Too smart, pause training
             if d_win_rate < 0.30:  # experimental
                 frac_attackers_to_remove = 0.50 - d_win_rate
-                if log_level>0:
+                if log_level >= 2:
                     print(f"d_win_rate is {d_win_rate}, removing {frac_attackers_to_remove} of attackers")
         else:
             train_attacker = train_attacker_orig
@@ -1151,39 +1170,39 @@ def main(game_name, human_attacker, human_defender, interactive, train_attacker,
         defender_temp = get_exploration_temp(num_games, initial_temp, final_temp, temp_decay)
         current_epsilon = get_epsilon(num_games, initial_epsilon, final_epsilon, epsilon_decay)
 
-        if log_level > 0 and benchmark:
+        if log_level >= 2 and benchmark:
             print(f"Exploration: temp={attacker_temp:.4f}, epsilon={current_epsilon:.4f}")
 
         play, a_game_states, a_corrected_scores, d_game_states, d_corrected_scores = \
             run_game(attacker_model, defender_model, human_attacker, human_defender, screen, game_name,
                      sample_frac, attacker_temp, defender_temp, frac_attackers_to_remove, frac_defenders_to_remove,
-                     epsilon=current_epsilon)
+                     epsilon=current_epsilon, log_level=log_level)
 
         end = timer()
         game_duration = end - start
-
-        # Just some basic debugging to monitor how the training is progressing:
-        if log_level>0:
-            print(
-                """Attacker has played:     {} games,\nDefender has played:     {} games,\nNum moves this game:     {} ({:0.3f} sec)"""
-                .format(num_train_games_attacker, num_train_games_defender,
-                        len(a_corrected_scores) + len(d_corrected_scores), game_duration))
 
         # Add Attacker outcome to the StatsTracker
         if len(a_corrected_scores) > 0:  # AI Attacker and/or defender
             stats.add_game_results(a_corrected_scores[-1], len(a_corrected_scores) + len(d_corrected_scores),
                                    game_duration)
-            if log_level>0:
-                print(stats)
         elif len(d_corrected_scores) > 0:  # AI defender only
             stats.add_game_results(-1 * d_corrected_scores[-1], len(a_corrected_scores) + len(d_corrected_scores),
                                    game_duration)
-            if log_level>0:
-                print(stats)
         # else: # PvP stats not tracked
 
+        should_print_summary = (
+            log_level >= 2 or
+            (log_level >= 1 and stats.num_games_total() % log_every == 0)
+        )
+        if should_print_summary:
+            print(
+                """Attacker has played:     {} games,\nDefender has played:     {} games,\nNum moves this game:     {} ({:0.3f} sec)"""
+                .format(num_train_games_attacker, num_train_games_defender,
+                        len(a_corrected_scores) + len(d_corrected_scores), game_duration))
+            print(stats)
+
         if train_attacker and attacker_model is not None and len(a_corrected_scores) > 0:
-            if log_level>0:
+            if log_level >= 2:
                 print("\nTraining attacker model:")
                 print("""Last Attacker states: {}""".format(
                       ' '.join(['{:+0.4f}'.format(entry) for entry in a_corrected_scores[-15:]])))
@@ -1192,13 +1211,13 @@ def main(game_name, human_attacker, human_defender, interactive, train_attacker,
             if use_td:
                 final_reward = a_corrected_scores[-1]
                 a_targets = compute_td_targets(a_game_states, final_reward, gamma=gamma, model=attacker_model)
-                if log_level>0:
+                if log_level >= 2:
                     print("""          TD targets: {}""".format(
                           ' '.join(['{:+0.4f}'.format(entry) for entry in a_targets[-15:]])))
             else:
                 smooth_corrected_scores_exp(a_corrected_scores)
                 a_targets = np.array(a_corrected_scores)
-                if log_level>0:
+                if log_level >= 2:
                     print("""            Smoothed: {}""".format(
                           ' '.join(['{:+0.4f}'.format(entry) for entry in a_corrected_scores[-15:]])))
 
@@ -1213,10 +1232,10 @@ def main(game_name, human_attacker, human_defender, interactive, train_attacker,
                 a_game_states = apply_random_symmetries_to_batch(a_game_states)
                 # targets unchanged - same size batch
 
-            update_model(attacker_model, a_game_states, a_targets, use_td=use_td, gamma=gamma)
+            update_model(attacker_model, a_game_states, a_targets, use_td=use_td, gamma=gamma, log_level=log_level)
 
         if train_defender and defender_model is not None and len(d_corrected_scores) > 0:
-            if log_level>0:
+            if log_level >= 2:
                 print("\nTraining defender model:")
                 print("""Last Defender states: {}""".format(
                       ' '.join(['{:+0.4f}'.format(entry) for entry in d_corrected_scores[-15:]])))
@@ -1225,13 +1244,13 @@ def main(game_name, human_attacker, human_defender, interactive, train_attacker,
             if use_td:
                 final_reward = d_corrected_scores[-1]
                 d_targets = compute_td_targets(d_game_states, final_reward, gamma=gamma, model=defender_model)
-                if log_level>0:
+                if log_level >= 2:
                     print("""          TD targets: {}""".format(
                           ' '.join(['{:+0.4f}'.format(entry) for entry in d_targets[-15:]])))
             else:
                 smooth_corrected_scores_exp(d_corrected_scores)
                 d_targets = np.array(d_corrected_scores)
-                if log_level>0:
+                if log_level >= 2:
                     print("""            Smoothed: {}""".format(
                           ' '.join(['{:+0.4f}'.format(entry) for entry in d_corrected_scores[-15:]])))
 
@@ -1246,7 +1265,7 @@ def main(game_name, human_attacker, human_defender, interactive, train_attacker,
                 d_game_states = apply_random_symmetries_to_batch(d_game_states)
                 # targets unchanged - same size batch
 
-            update_model(defender_model, d_game_states, d_targets, use_td=use_td, gamma=gamma)
+            update_model(defender_model, d_game_states, d_targets, use_td=use_td, gamma=gamma, log_level=log_level)
 
         if (stats.num_games_total() % cache_model_every == 0):  # Save every cache_model_every games
             # print('--- num games played: {}'.format(stats.num_games_total()))
