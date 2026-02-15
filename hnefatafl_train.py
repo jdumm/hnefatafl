@@ -207,22 +207,10 @@ def do_mostly_random_but_strike_to_kill_move(move):
             break
 
 
-def run_game(attacker_model=None, defender_model=None, human_attacker=False, human_defender=False, screen=None,
+def run_game(model=None, human_attacker=False, human_defender=False, screen=None,
              game_name='Hnefatafl', sample_frac=1.0, attacker_temp=0.1, defender_temp=0.1,
              frac_attackers_to_remove=0, frac_defenders_to_remove=0, epsilon=0.0, log_level=1):
-    """Start and run one game of computer attacker vs computer defender hnefatafl.
- 
-       Args:
-           attacker_model: Keras model that can '.predict' based on the game state.  Used
-                           to determine the best of available moves. Random moves by default.
-           defender_model: Same as attacker_model but for defender.  
-           screen: Optional, used to monitor matches in pygame.
-           game_name: Variant of Tafl to play.
-           sample_frac: Fraction of pieces AND fraction of their moves to consider, for speed.
-                        Default 1.0 considers all possible pieces and moves.
-           frac_attackers_to_remove: Fraction of Attacker's pieces to remove at random, for autobalancing.
-           frac_defenders_to_remove: Fraction of Defender's pieces to remove at random, for autobalancing.
-    """
+    """Run one game and return states plus terminal reward from attacker perspective."""
     board = tafl.Board(game_name)
     move = tafl.Move()
     tafl.initialize_pieces(board)
@@ -233,10 +221,7 @@ def run_game(attacker_model=None, defender_model=None, human_attacker=False, hum
             tafl.Attackers.sprites()[0].kill()
         else:
             tafl.Attackers.sprites()[1].kill()
-    a_game_states = []
-    a_predicted_scores = []
-    d_game_states = []
-    d_predicted_scores = []
+    game_states = []
     game_state_cache = deque(maxlen=20)
     play = True
     num_moves = 0
@@ -255,12 +240,7 @@ def run_game(attacker_model=None, defender_model=None, human_attacker=False, hum
         if num_moves >= 100 or (game_name.lower() == "simple" and num_moves > 4):
             if log_level >= 2:
                 print("--- Draw game after {} moves".format(num_moves))
-            # Replace last predictions with draw values instead of appending
-            if len(a_predicted_scores) > 0:
-                a_predicted_scores[-1] = -0.5  # Slight penalty for draws
-            if len(d_predicted_scores) > 0:
-                d_predicted_scores[-1] = -0.5  # Slight penalty for draws
-            return play, a_game_states, a_predicted_scores, d_game_states, d_predicted_scores
+            return play, game_states, -0.5, num_moves
 
         if move.a_turn:
             if game_name.lower() == "simple":
@@ -269,47 +249,40 @@ def run_game(attacker_model=None, defender_model=None, human_attacker=False, hum
                 # print("Attacker's Turn: Move {}".format(num_moves))
             if human_attacker:
                 play = do_human_turn(screen, board, move)
-            elif attacker_model is None:
-                game_state = do_random_move(move)
-                predicted_score = (random.random() - 0.5) * 2
-                a_game_states.append(game_state)
-                a_predicted_scores.append(predicted_score)
+            elif model is None:
+                do_random_move(move)
             else:
                 if human_defender: time.sleep(0.5)
-                game_state, predicted_score = do_best_move(move,
-                                                           attacker_model,
-                                                           game_state_cache,
-                                                           sample_frac=sample_frac,
-                                                           temperature=attacker_temp,
-                                                           enable_remove=True if game_name.lower() != 'simple' else False,
-                                                           screen=screen,
-                                                           board=board,
-                                                           epsilon=epsilon)
-                a_game_states.append(game_state)
-                a_predicted_scores.append(predicted_score)
+                game_state, _ = do_best_move(move,
+                                             model,
+                                             game_state_cache,
+                                             sample_frac=sample_frac,
+                                             temperature=attacker_temp,
+                                             enable_remove=True if game_name.lower() != 'simple' else False,
+                                             screen=screen,
+                                             board=board,
+                                             epsilon=epsilon,
+                                             prefer_max=True)
+                game_states.append(game_state)
         else:
             # print("Defender's Turn: Move {}".format(num_moves))
             if human_defender:
                 play = do_human_turn(screen, board, move)
-            elif defender_model is None:
-                # game_state = do_mostly_random_but_strike_to_kill_move(move)
-                game_state = do_dummy_1_defender_move(move)
-                predicted_score = (random.random() - 0.5) * 2
-                d_game_states.append(game_state)
-                d_predicted_scores.append(predicted_score)
+            elif model is None:
+                do_dummy_1_defender_move(move)
             else:
                 if human_attacker: time.sleep(0.5)
-                game_state, predicted_score = do_best_move(move,
-                                                           defender_model,
-                                                           game_state_cache,
-                                                           sample_frac=sample_frac,
-                                                           temperature=defender_temp,
-                                                           enable_remove=True if game_name.lower() != 'simple' else False,
-                                                           screen=screen,
-                                                           board=board,
-                                                           epsilon=epsilon)
-                d_game_states.append(game_state)
-                d_predicted_scores.append(predicted_score)
+                game_state, _ = do_best_move(move,
+                                             model,
+                                             game_state_cache,
+                                             sample_frac=sample_frac,
+                                             temperature=defender_temp,
+                                             enable_remove=True if game_name.lower() != 'simple' else False,
+                                             screen=screen,
+                                             board=board,
+                                             epsilon=epsilon,
+                                             prefer_max=False)
+                game_states.append(game_state)
 
         if move.escaped:
             text = "--- King escaped! Defenders win!"
@@ -318,37 +291,23 @@ def run_game(attacker_model=None, defender_model=None, human_attacker=False, hum
             text2 = "Play again? y/n"
             # Scale reward based on number of moves - faster wins get higher rewards
             
-            # Replace last predictions instead of appending
-            if len(a_predicted_scores) > 0:
-                a_predicted_scores[-1] = -1.0
-            if len(d_predicted_scores) > 0:
-                d_predicted_scores[-1] = +1.0
-                
             if screen:
                 tafl.update_image(screen, board, move, text, text2)
                 pygame.display.flip()
             if human_attacker or human_defender: play = end_game_loop(move)
-            return play, a_game_states, a_predicted_scores, d_game_states, d_predicted_scores
+            return play, game_states, -1.0, num_moves
         if move.king_killed:
             text = "--- King killed! Attackers win!"
             if log_level >= 2:
                 print(text)
             text2 = "Play again? y/n"
-            # Scale reward based on number of moves - faster wins get higher rewards
-            
-            # Replace last predictions instead of appending
-            if len(a_predicted_scores) > 0:
-                a_predicted_scores[-1] = +1.0 
-            if len(d_predicted_scores) > 0:
-                d_predicted_scores[-1] = -1.0
-                
             if screen:
                 tafl.update_image(screen, board, move, text, text2)
                 pygame.display.flip()
             if human_attacker or human_defender: play = end_game_loop(move)
-            return play, a_game_states, a_predicted_scores, d_game_states, d_predicted_scores
+            return play, game_states, +1.0, num_moves
         if move.restart:
-            return play, a_game_states, a_predicted_scores, d_game_states, d_predicted_scores
+            return play, game_states, 0.0, num_moves
 
 
 def end_game_loop(move):
@@ -442,7 +401,8 @@ def do_human_turn(screen, board, move):
             return True
 
 
-def do_best_move(move, model, game_state_cache, sample_frac=1.0, screen=None, board=None, enable_remove=True, temperature=0.1, epsilon=0.0):
+def do_best_move(move, model, game_state_cache, sample_frac=1.0, screen=None, board=None, enable_remove=True,
+                 temperature=0.1, epsilon=0.0, prefer_max=True):
     """ Function to try all possible moves and select the best according to the model provided.
 
     Uses batch inference for efficiency: collects all candidate states first, then
@@ -476,7 +436,7 @@ def do_best_move(move, model, game_state_cache, sample_frac=1.0, screen=None, bo
                         move.remove_pieces(tafl.Attackers, tafl.Defenders, tafl.Kings, king_is_special)
                     move.end_turn(tafl.Current.sprites()[0])
                     tafl.Current.empty()
-                    return game_state, 1.0
+                    return game_state, 1.0 if prefer_max else -1.0
             move.select(king)
             tafl.Current.empty()
 
@@ -594,7 +554,7 @@ def do_best_move(move, model, game_state_cache, sample_frac=1.0, screen=None, bo
         scores = scores + np.random.normal(0, temperature, size=scores.shape)
 
     # Phase 3: Select best move
-    best_idx = np.argmax(scores)
+    best_idx = np.argmax(scores) if prefer_max else np.argmin(scores)
     best_piece, best_move_pos, best_game_state, best_vm = candidates[best_idx]
     best_score = scores[best_idx]
 
@@ -860,7 +820,7 @@ def smooth_corrected_scores_exp(corrected_scores, dynamic=True, decay_constant=5
         corrected_scores[i] = (corrected_scores[i] + alpha * final_outcome + advantage_reward) / (1. + alpha)
 
 
-def compute_td_targets(game_states, final_reward, gamma=0.95, model=None):
+def compute_td_targets(game_states, final_reward, gamma=0.95, model=None, negate_next_value=True):
     """Compute TD(0) targets with bootstrapped next-state values.
 
     Args:
@@ -887,10 +847,10 @@ def compute_td_targets(game_states, final_reward, gamma=0.95, model=None):
         states_reshaped = states_array.reshape(-1, tafl.DIM, tafl.DIM, num_channels)
         values = model.predict(states_reshaped, verbose=0).flatten()
 
-        # TD(0): target[i] = gamma * (-V(s_{i+1}))
-        # Negate because opponent's good position is bad for us
+        # TD(0): target[i] = gamma * V(s_{i+1}) for attacker-perspective value.
+        # For side-to-move value functions, set negate_next_value=True.
         for i in range(n-2, -1, -1):
-            next_value = -values[i+1]  # Negate for opponent's perspective
+            next_value = -values[i+1] if negate_next_value else values[i+1]
             targets[i] = gamma * next_value
     else:
         # Fallback to Monte Carlo returns if no model
@@ -964,6 +924,8 @@ def update_model(model, states, rewards, batch_size=32, use_td=False, gamma=0.95
               help='Set to update attacker AI after each game')
 @click.option('-td/-nd', '--train-defender/--no-train-defender', default=False,
               help='Set to update defender AI after each game')
+@click.option('--train-model/--no-train-model', default=False,
+              help='Train the shared model after each game')
 @click.option('-dt/-st', '--dynamic-train/--static-train', default=False, help='Set to pause defender AI when lopsided')
 @click.option('-c', '--cache-model-every', default=100, help='Cache the Keras DNN model every so many games')
 @click.option('-e/-ne', '--exit-after-cache/--no-exit-after-cache', default=False, help='Exit after model cache step to allow restart')
@@ -973,6 +935,7 @@ def update_model(model, states, rewards, batch_size=32, use_td=False, gamma=0.95
               help='Apply random symmetry transform to each state (alternative to --use-symmetry)')
 @click.option('-al', '--attacker-load', default=0, help='Attacker model file num to load')
 @click.option('-dl', '--defender-load', default=0, help='Defender model file num to load')
+@click.option('-ml', '--model-load', default=0, help='Shared model file num to load')
 @click.option('-sl', '--stats-load', default=0, help='Stats model file num to load')
 @click.option('-ll/-nl', '--load-latest/--not-latest', default=False, help='Set to search and use latest models/stats files')
 @click.option('-v', '--version', default=7, help='Model version number')
@@ -994,9 +957,9 @@ def update_model(model, states, rewards, batch_size=32, use_td=False, gamma=0.95
               help='Logging verbosity: 0=minimal, 1=periodic summaries, 2=per-game debug')
 @click.option('--log-every', default=100, type=click.IntRange(1, 1000000),
               help='At log-level 1, print summary every N games')
-def main(game_name, human_attacker, human_defender, interactive, train_attacker, train_defender, dynamic_train,
+def main(game_name, human_attacker, human_defender, interactive, train_attacker, train_defender, train_model, dynamic_train,
          cache_model_every, exit_after_cache, use_symmetry, probabilistic_symmetry,
-         attacker_load, defender_load, stats_load, load_latest, version,
+         attacker_load, defender_load, model_load, stats_load, load_latest, version,
          use_td, gamma, initial_temp, final_temp, temp_decay,
          initial_epsilon, final_epsilon, epsilon_decay, benchmark, batchnorm, learning_rate, model_preset,
          log_level, log_every):
@@ -1032,21 +995,31 @@ def main(game_name, human_attacker, human_defender, interactive, train_attacker,
     # cache_model_every = 50 # games
     # use_symmetry = False
 
-    if human_attacker and train_attacker:  # Sorry, I can't train humans
-        print("Conflicting options human_attacker={} and train_attacker={}. Exiting.".format(human_attacker,
-                                                                                             train_attacker))
+    # Backward-compatible aliases: legacy split train flags now map to shared train flag.
+    if train_attacker or train_defender:
+        if not train_model:
+            print("Info: --train-attacker/--train-defender are deprecated. Using shared --train-model.")
+        train_model = train_model or train_attacker or train_defender
+
+    # Backward-compatible aliases: split load flags map to shared model-load.
+    legacy_loads = [v for v in (attacker_load, defender_load) if v > 0]
+    if len(set(legacy_loads)) > 1:
+        print("Conflicting options attacker_load and defender_load with different values. Exiting.")
         sys.exit(1)
-    if human_defender and train_defender:
-        print("Conflicting options human_defender={} and train_defender={}. Exiting.".format(human_defender,
-                                                                                             train_defender))
+    if defender_load == -1:
+        print("defender_load=-1 is not supported with shared model mode. Exiting.")
         sys.exit(1)
-    if (attacker_load > 0 or defender_load > 0) and load_latest:
-        print("Conflicting options attacker_load={} or defender_load={} with load_latest set. Exiting.".format(attacker_load,
-                                                                                                               defender_load))
+    if model_load == 0 and legacy_loads:
+        model_load = legacy_loads[0]
+        print(f"Info: using shared --model-load {model_load} from legacy split load options.")
+
+    if model_load > 0 and load_latest:
+        print(f"Conflicting options model_load={model_load} with load_latest set. Exiting.")
         sys.exit(1)
 
-    train_attacker_orig = train_attacker
-    train_defender_orig = train_defender
+    if human_attacker and human_defender and train_model:
+        print("Conflicting options: cannot train model when both sides are human. Exiting.")
+        sys.exit(1)
 
     if interactive:
         pygame.init()
@@ -1057,24 +1030,22 @@ def main(game_name, human_attacker, human_defender, interactive, train_attacker,
     tafl.initialize_groups()
     temp_board = tafl.Board(game_name)  # Just used to initialize global DIM for game_name...
 
-    num_train_games_attacker = 0
-    num_train_games_defender = 0
-    # version         = 6  # Used to track major changes/restarts
+    num_train_games_model = 0
 
     save_dir = 'models_{}_v{}'.format(game_name.lower(), version)
     if not human_attacker or not human_defender: os.makedirs(save_dir, exist_ok=True)
 
-    stats_tracker_loaded = False
-    attacker_model = None
-    if not human_attacker:
+    has_ai_player = (not human_attacker) or (not human_defender)
+    model = None
+    if has_ai_player:
         if load_latest:
-            a_model_files = glob(save_dir + '/attacker_model_*_games.keras')
-            if len(a_model_files) > 0:
-                attacker_load = max([int(f.split("_")[4]) for f in a_model_files])  # Parse filenames and get latest
+            model_files = glob(save_dir + '/shared_model_*_games.keras')
+            if len(model_files) > 0:
+                model_load = max([int(f.split("_")[2]) for f in model_files])  # Parse filenames and get latest
             else:
-                attacker_load = 0
-        if attacker_load == 0:
-            attacker_model = initialize_model_for_game(
+                model_load = 0
+        if model_load == 0:
+            model = initialize_model_for_game(
                 game_name=game_name,
                 num_channels=num_channels,
                 use_batchnorm=batchnorm,
@@ -1082,40 +1053,12 @@ def main(game_name, human_attacker, human_defender, interactive, train_attacker,
                 model_preset=effective_preset,
             )
         else:
-            attacker_model = load_model('{}/attacker_model_{}_games.keras'.format(save_dir, attacker_load))
-            validate_model_channels(attacker_model, num_channels, "Attacker")
-            # Recompile with fresh optimizer
+            model = load_model('{}/shared_model_{}_games.keras'.format(save_dir, model_load))
+            validate_model_channels(model, num_channels, "Shared")
             optimizer = Adam(learning_rate=learning_rate)
-            attacker_model.compile(optimizer=optimizer, loss='mean_squared_error')
-            print(f"Attacker model reloaded with learning_rate={learning_rate}")
-            num_train_games_attacker = attacker_load
-
-    defender_model = None
-    if not human_defender:
-        if load_latest:
-            d_model_files = glob(save_dir + '/defender_model_*_games.keras')
-            if len(d_model_files) > 0:
-                defender_load = max([int(f.split("_")[4]) for f in d_model_files])  # Parse filenames and get latest
-            else:
-                defender_load = 0
-        if defender_load == -1:
-            defender_model = None  # Defaults to mostly random + some extra King movements
-        elif defender_load == 0:
-            defender_model = initialize_model_for_game(
-                game_name=game_name,
-                num_channels=num_channels,
-                use_batchnorm=batchnorm,
-                learning_rate=learning_rate,
-                model_preset=effective_preset,
-            )
-        else:
-            defender_model = load_model('{}/defender_model_{}_games.keras'.format(save_dir, defender_load))
-            validate_model_channels(defender_model, num_channels, "Defender")
-            # Recompile with fresh optimizer
-            optimizer = Adam(learning_rate=learning_rate)
-            defender_model.compile(optimizer=optimizer, loss='mean_squared_error')
-            print(f"Defender model reloaded with learning_rate={learning_rate}")
-            num_train_games_defender = defender_load
+            model.compile(optimizer=optimizer, loss='mean_squared_error')
+            print(f"Shared model reloaded with learning_rate={learning_rate}")
+            num_train_games_model = model_load
 
     stats = None
     if load_latest:
@@ -1124,48 +1067,37 @@ def main(game_name, human_attacker, human_defender, interactive, train_attacker,
             stats_load = max([int(f.split("_")[3]) for f in stats_files])
         else:
             stats_load = 0
-    if stats_load > 0 and (not human_attacker or not human_defender):
+    if stats_load > 0 and has_ai_player:
         stats = pickle.load(open('{}/StatsTracker_{}_games.pkl'.format(save_dir, stats_load), 'rb'))
     else:  # no previous stats
         stats = StatsTracker(200)
 
     play = True
     while play:
-        if train_attacker: num_train_games_attacker += 1
-        if train_defender: num_train_games_defender += 1
+        if train_model:
+            num_train_games_model += 1
 
         start = timer()
 
-        sample_frac = 0.90
-        # TODO: Separate & based on number of trained games.  Then add noise to decision.
-        sample_frac_attacker = 0.90
-        sample_frac_defender = 0.90
-
         frac_attackers_to_remove = 0.00
         frac_defenders_to_remove = 0.00
-        # Make a decision about whether or not to keep training Defender
+        # Dynamic balancing by piece removal only (shared model always trains together).
         a_win_rate = (stats.a_win_rate_window() + stats.draw_rate_window() / 2.)  # Draws count half
         d_win_rate = 1 - a_win_rate
         if dynamic_train and a_win_rate < 0.40:
-            train_defender = False  # Too smart, pause training
             if a_win_rate < 0.30:  # experimental
                 frac_defenders_to_remove = 0.50 - a_win_rate
                 if log_level >= 2:
                     print(f"a_win_rate is {a_win_rate}, removing {frac_defenders_to_remove} of defenders")
-        else:
-            train_defender = train_defender_orig
 
         if dynamic_train and d_win_rate < 0.40:
-            train_attacker = False  # Too smart, pause training
             if d_win_rate < 0.30:  # experimental
                 frac_attackers_to_remove = 0.50 - d_win_rate
                 if log_level >= 2:
                     print(f"d_win_rate is {d_win_rate}, removing {frac_attackers_to_remove} of attackers")
-        else:
-            train_attacker = train_attacker_orig
 
         # Calculate exploration parameters with decay
-        num_games = max(num_train_games_attacker, num_train_games_defender)
+        num_games = num_train_games_model
         attacker_temp = get_exploration_temp(num_games, initial_temp, final_temp, temp_decay)
         defender_temp = get_exploration_temp(num_games, initial_temp, final_temp, temp_decay)
         current_epsilon = get_epsilon(num_games, initial_epsilon, final_epsilon, epsilon_decay)
@@ -1173,22 +1105,26 @@ def main(game_name, human_attacker, human_defender, interactive, train_attacker,
         if log_level >= 2 and benchmark:
             print(f"Exploration: temp={attacker_temp:.4f}, epsilon={current_epsilon:.4f}")
 
-        play, a_game_states, a_corrected_scores, d_game_states, d_corrected_scores = \
-            run_game(attacker_model, defender_model, human_attacker, human_defender, screen, game_name,
-                     sample_frac, attacker_temp, defender_temp, frac_attackers_to_remove, frac_defenders_to_remove,
-                     epsilon=current_epsilon, log_level=log_level)
+        play, game_states, final_reward, num_moves_game = run_game(
+            model=model,
+            human_attacker=human_attacker,
+            human_defender=human_defender,
+            screen=screen,
+            game_name=game_name,
+            sample_frac=0.90,
+            attacker_temp=attacker_temp,
+            defender_temp=defender_temp,
+            frac_attackers_to_remove=frac_attackers_to_remove,
+            frac_defenders_to_remove=frac_defenders_to_remove,
+            epsilon=current_epsilon,
+            log_level=log_level,
+        )
 
         end = timer()
         game_duration = end - start
 
-        # Add Attacker outcome to the StatsTracker
-        if len(a_corrected_scores) > 0:  # AI Attacker and/or defender
-            stats.add_game_results(a_corrected_scores[-1], len(a_corrected_scores) + len(d_corrected_scores),
-                                   game_duration)
-        elif len(d_corrected_scores) > 0:  # AI defender only
-            stats.add_game_results(-1 * d_corrected_scores[-1], len(a_corrected_scores) + len(d_corrected_scores),
-                                   game_duration)
-        # else: # PvP stats not tracked
+        if has_ai_player:
+            stats.add_game_results(final_reward, num_moves_game, game_duration)
 
         should_print_summary = (
             log_level >= 2 or
@@ -1196,92 +1132,53 @@ def main(game_name, human_attacker, human_defender, interactive, train_attacker,
         )
         if should_print_summary:
             print(
-                """Attacker has played:     {} games,\nDefender has played:     {} games,\nNum moves this game:     {} ({:0.3f} sec)"""
-                .format(num_train_games_attacker, num_train_games_defender,
-                        len(a_corrected_scores) + len(d_corrected_scores), game_duration))
+                """Model has played:        {} games,\nNum moves this game:     {} ({:0.3f} sec)"""
+                .format(num_train_games_model, num_moves_game, game_duration))
             print(stats)
 
-        if train_attacker and attacker_model is not None and len(a_corrected_scores) > 0:
+        if train_model and model is not None and len(game_states) > 0:
             if log_level >= 2:
-                print("\nTraining attacker model:")
-                print("""Last Attacker states: {}""".format(
-                      ' '.join(['{:+0.4f}'.format(entry) for entry in a_corrected_scores[-15:]])))
+                print("\nTraining shared model:")
 
-            # Use TD learning or legacy smoothing
             if use_td:
-                final_reward = a_corrected_scores[-1]
-                a_targets = compute_td_targets(a_game_states, final_reward, gamma=gamma, model=attacker_model)
+                targets = compute_td_targets(
+                    game_states, final_reward, gamma=gamma, model=model, negate_next_value=False
+                )
                 if log_level >= 2:
                     print("""          TD targets: {}""".format(
-                          ' '.join(['{:+0.4f}'.format(entry) for entry in a_targets[-15:]])))
+                          ' '.join(['{:+0.4f}'.format(entry) for entry in targets[-15:]])))
             else:
-                smooth_corrected_scores_exp(a_corrected_scores)
-                a_targets = np.array(a_corrected_scores)
+                targets = compute_td_targets(
+                    game_states, final_reward, gamma=gamma, model=None, negate_next_value=False
+                )
                 if log_level >= 2:
-                    print("""            Smoothed: {}""".format(
-                          ' '.join(['{:+0.4f}'.format(entry) for entry in a_corrected_scores[-15:]])))
-
-            # Convert to numpy arrays without shuffling
-            a_game_states = np.array(a_game_states)
+                    print("""  Discounted returns: {}""".format(
+                          ' '.join(['{:+0.4f}'.format(entry) for entry in targets[-15:]])))
+            game_states = np.array(game_states)
 
             # Symmetry augmentation (mutually exclusive options)
             if use_symmetry:
-                a_game_states = expand_game_states_symmetries(a_game_states)
-                a_targets = np.tile(a_targets, 8)
+                game_states = expand_game_states_symmetries(game_states)
+                targets = np.tile(targets, 8)
             elif probabilistic_symmetry:
-                a_game_states = apply_random_symmetries_to_batch(a_game_states)
+                game_states = apply_random_symmetries_to_batch(game_states)
                 # targets unchanged - same size batch
 
-            update_model(attacker_model, a_game_states, a_targets, use_td=use_td, gamma=gamma, log_level=log_level)
-
-        if train_defender and defender_model is not None and len(d_corrected_scores) > 0:
-            if log_level >= 2:
-                print("\nTraining defender model:")
-                print("""Last Defender states: {}""".format(
-                      ' '.join(['{:+0.4f}'.format(entry) for entry in d_corrected_scores[-15:]])))
-
-            # Use TD learning or legacy smoothing
-            if use_td:
-                final_reward = d_corrected_scores[-1]
-                d_targets = compute_td_targets(d_game_states, final_reward, gamma=gamma, model=defender_model)
-                if log_level >= 2:
-                    print("""          TD targets: {}""".format(
-                          ' '.join(['{:+0.4f}'.format(entry) for entry in d_targets[-15:]])))
-            else:
-                smooth_corrected_scores_exp(d_corrected_scores)
-                d_targets = np.array(d_corrected_scores)
-                if log_level >= 2:
-                    print("""            Smoothed: {}""".format(
-                          ' '.join(['{:+0.4f}'.format(entry) for entry in d_corrected_scores[-15:]])))
-
-            # Convert to numpy arrays without shuffling
-            d_game_states = np.array(d_game_states)
-
-            # Symmetry augmentation (mutually exclusive options)
-            if use_symmetry:
-                d_game_states = expand_game_states_symmetries(d_game_states)
-                d_targets = np.tile(d_targets, 8)
-            elif probabilistic_symmetry:
-                d_game_states = apply_random_symmetries_to_batch(d_game_states)
-                # targets unchanged - same size batch
-
-            update_model(defender_model, d_game_states, d_targets, use_td=use_td, gamma=gamma, log_level=log_level)
+            update_model(model, game_states, targets, use_td=use_td, gamma=gamma, log_level=log_level)
 
         if (stats.num_games_total() % cache_model_every == 0):  # Save every cache_model_every games
-            # print('--- num games played: {}'.format(stats.num_games_total()))
-            if num_train_games_attacker > 0: attacker_model.save(
-                '{}/attacker_model_{}_games.keras'.format(save_dir, num_train_games_attacker))
-            if num_train_games_defender > 0: defender_model.save(
-                '{}/defender_model_{}_games.keras'.format(save_dir, num_train_games_defender))
-            if train_attacker or train_defender: pickle.dump(stats, open(
+            if num_train_games_model > 0 and model is not None:
+                model.save('{}/shared_model_{}_games.keras'.format(save_dir, num_train_games_model))
+            if train_model and has_ai_player:
+                pickle.dump(stats, open(
                 '{}/StatsTracker_{}_games.pkl'.format(save_dir, stats.num_games_total()), 'wb'))
             if exit_after_cache:  # To avoid possible memory leak for long training sessions
                 sys.exit()
 
         if interactive:
             time.sleep(2)
-        if max(num_train_games_attacker,
-               num_train_games_defender) >= 1000000: play = False  # Hardcoded cutoff just to make sure things don't go too crazy.
+        if num_train_games_model >= 1000000:
+            play = False  # Hardcoded cutoff just to make sure things don't go too crazy.
 
         tafl.cleanup()
 
