@@ -24,14 +24,15 @@ import itertools
 import pickle
 from collections import deque
 from copy import deepcopy
-import tensorflow as tf
-from keras import Sequential, Model, Input
-from keras.layers import Dense, Activation, Dropout, Conv2D, Flatten, MaxPooling2D, BatchNormalization, Add, Concatenate
-from keras.optimizers import SGD, Adam
+from keras.optimizers import Adam
 from keras.models import load_model
-from keras.initializers import TruncatedNormal
 
 import hnefatafl as tafl
+from models import (
+    initialize_residual_multiscale_cnn_model,
+    initialize_compact_model_simple,
+    validate_model_channels,
+)
 from stats_tracker import StatsTracker
 
 
@@ -636,155 +637,6 @@ def do_best_move(move, model, game_state_cache, sample_frac=1.0, screen=None, bo
         sys.exit(1)
 
 
-def initialize_random_cnn_model_3d_sonnet(num_channels=8, use_batchnorm=True, learning_rate=0.001):
-    """ Initialize Keras CNN model optimized for 7x7 board game learning.
-
-    Architecture features:
-    - Multiple channels to represent different piece types and board positions
-    - Residual connections to help learn complex spatial relationships
-    - Multiple convolutional layers with different kernel sizes to capture both local and broader patterns
-    - Batch normalization for training stability
-    - Dropout for regularization
-
-    Args:
-        num_channels: Number of input channels (8-channel encoding)
-        use_batchnorm: Whether to use batch normalization layers
-    """
-    print(f"Initializing CNN model v2 for board game learning ({num_channels} channels, batchnorm={use_batchnorm})")
-
-    input_shape = (tafl.DIM, tafl.DIM, num_channels)
-    std = 0.1  # Small std to prevent score explosion through deep network
-
-    inputs = Input(shape=input_shape)
-
-    # Initial convolution block
-    x = Conv2D(64, (3, 3), padding='same', use_bias=not use_batchnorm,
-               kernel_initializer=TruncatedNormal(mean=0.0, stddev=std))(inputs)
-    if use_batchnorm:
-        x = BatchNormalization()(x)
-    x = Activation('relu')(x)
-
-    # First residual block
-    res = x
-    x = Conv2D(64, (3, 3), padding='same', use_bias=not use_batchnorm,
-               kernel_initializer=TruncatedNormal(mean=0.0, stddev=std))(x)
-    if use_batchnorm:
-        x = BatchNormalization()(x)
-    x = Activation('relu')(x)
-    x = Conv2D(64, (3, 3), padding='same', use_bias=not use_batchnorm,
-               kernel_initializer=TruncatedNormal(mean=0.0, stddev=std))(x)
-    if use_batchnorm:
-        x = BatchNormalization()(x)
-    x = Add()([x, res])
-    x = Activation('relu')(x)
-
-    # Pattern recognition block - different kernel sizes
-    # 5x5 for broader patterns like surrounding threats
-    branch1 = Conv2D(32, (5, 5), padding='same', use_bias=not use_batchnorm,
-                     kernel_initializer=TruncatedNormal(mean=0.0, stddev=std))(x)
-    if use_batchnorm:
-        branch1 = BatchNormalization()(branch1)
-    branch1 = Activation('relu')(branch1)
-
-    # 3x3 for local patterns
-    branch2 = Conv2D(32, (3, 3), padding='same', use_bias=not use_batchnorm,
-                     kernel_initializer=TruncatedNormal(mean=0.0, stddev=std))(x)
-    if use_batchnorm:
-        branch2 = BatchNormalization()(branch2)
-    branch2 = Activation('relu')(branch2)
-
-    # 1x1 for point-wise patterns
-    branch3 = Conv2D(32, (1, 1), padding='same', use_bias=not use_batchnorm,
-                     kernel_initializer=TruncatedNormal(mean=0.0, stddev=std))(x)
-    if use_batchnorm:
-        branch3 = BatchNormalization()(branch3)
-    branch3 = Activation('relu')(branch3)
-
-    x = Concatenate()([branch1, branch2, branch3])
-    x = Dropout(0.2)(x)
-
-    # Final convolution to reduce channels
-    x = Conv2D(32, (3, 3), padding='same', use_bias=not use_batchnorm,
-               kernel_initializer=TruncatedNormal(mean=0.0, stddev=std))(x)
-    if use_batchnorm:
-        x = BatchNormalization()(x)
-    x = Activation('relu')(x)
-
-    # Flatten and dense layers
-    x = Flatten()(x)
-    x = Dense(256, activation='relu',
-              kernel_initializer=TruncatedNormal(mean=0.0, stddev=std))(x)
-    x = Dropout(0.3)(x)
-    x = Dense(128, activation='relu',
-              kernel_initializer=TruncatedNormal(mean=0.0, stddev=std))(x)
-
-    # Final layer with tanh to bound outputs between -1 and 1
-    x = Dense(1, activation='tanh',
-              kernel_initializer=TruncatedNormal(mean=0.0, stddev=std))(x)
-
-    model = Model(inputs=inputs, outputs=x)
-
-    optimizer = Adam(learning_rate=learning_rate)
-    model.compile(optimizer=optimizer, loss='mean_squared_error')
-
-    print(f"Model initialized with learning_rate={learning_rate}")
-    model.summary()
-    return model
-
-
-def initialize_cnn_model_claude(input_shape):
-    std = 0.1
-    inputs = Input(shape=input_shape)
-    
-    # Initial convolution
-    x = Conv2D(64, (3, 3), padding='same', activation='relu',
-               kernel_initializer=TruncatedNormal(mean=0.0, stddev=std))(inputs)
-    
-    # Residual blocks
-    for _ in range(4):
-        res = x
-        x = Conv2D(64, (3, 3), padding='same', activation='relu',
-                   kernel_initializer=TruncatedNormal(mean=0.0, stddev=std))(x)
-        x = Conv2D(64, (3, 3), padding='same',
-                   kernel_initializer=TruncatedNormal(mean=0.0, stddev=std))(x)
-        x = Add()([x, res])
-        x = Activation('relu')(x)
-        x = Dropout(0.1)(x)
-    
-    # Pattern recognition block
-    branch1 = Conv2D(32, (5, 5), padding='same', activation='relu',
-                     kernel_initializer=TruncatedNormal(mean=0.0, stddev=std))(x)
-    branch2 = Conv2D(32, (3, 3), padding='same', activation='relu',
-                     kernel_initializer=TruncatedNormal(mean=0.0, stddev=std))(x)
-    branch3 = Conv2D(32, (1, 1), padding='same', activation='relu',
-                     kernel_initializer=TruncatedNormal(mean=0.0, stddev=std))(x)
-    
-    x = Concatenate()([branch1, branch2, branch3])
-    x = Dropout(0.2)(x)
-    
-    # Final convolution
-    x = Conv2D(32, (3, 3), padding='same', activation='relu',
-               kernel_initializer=TruncatedNormal(mean=0.0, stddev=std))(x)
-    
-    # Dense layers
-    x = Flatten()(x)
-    x = Dense(256, activation='relu',
-              kernel_initializer=TruncatedNormal(mean=0.0, stddev=std))(x)
-    x = Dropout(0.3)(x)
-    x = Dense(128, activation='relu', 
-              kernel_initializer=TruncatedNormal(mean=0.0, stddev=std))(x)
-    
-    # Output layer
-    x = Dense(1, activation='tanh',
-              kernel_initializer=TruncatedNormal(mean=0.0, stddev=std))(x)
-    
-    model = Model(inputs=inputs, outputs=x)
-    optimizer = Adam(learning_rate=0.01)
-    model.compile(optimizer=optimizer, loss='mean_squared_error')
-    
-    return model
-
-
 A_DIM = 0
 D_DIM = 2
 K_DIM = 1
@@ -1097,61 +949,6 @@ def update_model(model, states, rewards, batch_size=32, use_td=False, gamma=0.95
     return history
 
 
-def initialize_compact_model_simple(num_channels=8, learning_rate=0.001):
-    """ Initialize an extremely compact model specifically for 5x5 simple game mode.
-    The model focuses purely on spatial relationships between pieces, particularly
-    the relative positions of attacker vs king and potential blocking positions.
-
-    Args:
-        num_channels: Number of input channels (8-channel encoding)
-    """
-    print(f"Initializing minimal model for simple game mode ({num_channels} channels)")
-
-    input_shape = (tafl.DIM, tafl.DIM, num_channels)
-    std = 0.1
-    
-    inputs = Input(shape=input_shape)
-    
-    # Single conv layer to detect piece positions and basic spatial patterns
-    # Using 8 filters to keep it very simple
-    x = Conv2D(8, (3, 3), padding='same', activation='relu',
-               kernel_initializer=TruncatedNormal(mean=0.0, stddev=std))(inputs)
-    
-    # Direct 1x1 convolution to focus on piece presence
-    x = Conv2D(4, (1, 1), padding='same', activation='relu',
-               kernel_initializer=TruncatedNormal(mean=0.0, stddev=std))(x)
-    
-    # Flatten and minimal dense layer
-    x = Flatten()(x)
-    x = Dense(16, activation='relu',
-              kernel_initializer=TruncatedNormal(mean=0.0, stddev=std))(x)
-    
-    # Output with tanh activation
-    x = Dense(1, activation='tanh',
-              kernel_initializer=TruncatedNormal(mean=0.0, stddev=std))(x)
-    
-    model = Model(inputs=inputs, outputs=x)
-
-    optimizer = Adam(learning_rate=learning_rate)
-    model.compile(optimizer=optimizer, loss='mean_squared_error')
-
-    print(f"Model initialized with learning_rate={learning_rate}")
-    model.summary()
-    return model
-
-
-def validate_model_channels(model, expected_channels, model_name):
-    """Ensure loaded model input channels match current encoding."""
-    input_shape = model.input_shape
-    if isinstance(input_shape, list):
-        input_shape = input_shape[0]
-    model_channels = input_shape[-1]
-    if model_channels != expected_channels:
-        print(f"Error: {model_name} model expects {model_channels} channels, but current encoding uses {expected_channels}.")
-        print("Hint: train/load compatible checkpoints that were built with the current 8-channel encoding.")
-        sys.exit(1)
-
-
 @click.command()
 @click.option('-g', '--game-name', default='Hnefatafl', help='Name of Tafl variant to play')
 @click.option('-ha/-aa', '--human-attacker/--ai-attacker', default=False, help='Set to play attacker manually')
@@ -1267,7 +1064,7 @@ def main(game_name, human_attacker, human_defender, interactive, train_attacker,
             if game_name.lower() == "simple":
                 attacker_model = initialize_compact_model_simple(num_channels=num_channels, learning_rate=learning_rate)
             else:
-                attacker_model = initialize_random_cnn_model_3d_sonnet(num_channels=num_channels, use_batchnorm=batchnorm, learning_rate=learning_rate)
+                attacker_model = initialize_residual_multiscale_cnn_model(num_channels=num_channels, use_batchnorm=batchnorm, learning_rate=learning_rate)
         else:
             attacker_model = load_model('{}/attacker_model_{}_games.keras'.format(save_dir, attacker_load))
             validate_model_channels(attacker_model, num_channels, "Attacker")
@@ -1291,7 +1088,7 @@ def main(game_name, human_attacker, human_defender, interactive, train_attacker,
             if game_name.lower() == "simple":
                 defender_model = initialize_compact_model_simple(num_channels=num_channels, learning_rate=learning_rate)
             else:
-                defender_model = initialize_random_cnn_model_3d_sonnet(num_channels=num_channels, use_batchnorm=batchnorm, learning_rate=learning_rate)
+                defender_model = initialize_residual_multiscale_cnn_model(num_channels=num_channels, use_batchnorm=batchnorm, learning_rate=learning_rate)
         else:
             defender_model = load_model('{}/defender_model_{}_games.keras'.format(save_dir, defender_load))
             validate_model_channels(defender_model, num_channels, "Defender")
