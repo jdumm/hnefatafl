@@ -207,7 +207,7 @@ def do_mostly_random_but_strike_to_kill_move(move):
 
 
 def run_game(attacker_model=None, defender_model=None, human_attacker=False, human_defender=False, screen=None,
-             game_name='Hnefatafl', sample_frac=1.0, attacker_temp=0.1, defender_temp=0.1, frac_attackers_to_remove=0, frac_defenders_to_remove=0):
+             game_name='Hnefatafl', sample_frac=1.0, attacker_temp=0.1, defender_temp=0.1, frac_attackers_to_remove=0, frac_defenders_to_remove=0, epsilon=0.0):
     """Start and run one game of computer attacker vs computer defender hnefatafl.
  
        Args:
@@ -280,8 +280,8 @@ def run_game(attacker_model=None, defender_model=None, human_attacker=False, hum
                                                            temperature=attacker_temp,
                                                            enable_remove=True if game_name.lower() != 'simple' else False,
                                                            screen=screen,
-                                                           board=board)
-                # game_state,predicted_score = do_best_move(move,attacker_model,game_state_cache,sample_frac=1.00,screen=screen,board=board)
+                                                           board=board,
+                                                           epsilon=epsilon)
                 a_game_states.append(game_state)
                 a_predicted_scores.append(predicted_score)
         else:
@@ -303,8 +303,8 @@ def run_game(attacker_model=None, defender_model=None, human_attacker=False, hum
                                                            temperature=defender_temp,
                                                            enable_remove=True if game_name.lower() != 'simple' else False,
                                                            screen=screen,
-                                                           board=board)
-                # game_state,predicted_score = do_best_move(move,defender_model,game_state_cache,sample_frac=1.00,screen=screen,board=board)
+                                                           board=board,
+                                                           epsilon=epsilon)
                 d_game_states.append(game_state)
                 d_predicted_scores.append(predicted_score)
 
@@ -437,8 +437,14 @@ def do_human_turn(screen, board, move):
             return True
 
 
-def do_best_move(move, model, game_state_cache, sample_frac=1.0, screen=None, board=None, enable_remove=True, temperature=0.1):
+def do_best_move(move, model, game_state_cache, sample_frac=1.0, screen=None, board=None, enable_remove=True, temperature=0.1, epsilon=0.0):
     """ Function to try all possible moves and select the best according to the model provided.
+
+    Uses batch inference for efficiency: collects all candidate states first, then
+    makes a single batched prediction call instead of one call per move.
+
+    Args:
+        epsilon: Probability of making a random move (exploration)
     """
     game_state = game_state_to_3d_array()
     game_state_cache.append(deepcopy(game_state))
@@ -447,7 +453,7 @@ def do_best_move(move, model, game_state_cache, sample_frac=1.0, screen=None, bo
     simple_game = (tafl.DIM == 5)
     if simple_game:
         sample_frac = 1.0  # Always consider all moves in simple game
-        
+
     if move.a_turn:
         pieces = tafl.Attackers
     else:
@@ -472,12 +478,41 @@ def do_best_move(move, model, game_state_cache, sample_frac=1.0, screen=None, bo
     if len(pieces) == 0:
         return game_state, 0.0
 
-    best_score = -1000000.0
-    best_piece = pieces.sprites()[0]
-    best_move = None
-    best_game_state = None
-    best_vm = None
-    
+    # Epsilon-greedy: random move with probability epsilon
+    if epsilon > 0 and random.random() < epsilon:
+        # Select a random piece with valid moves
+        valid_pieces = []
+        for piece in pieces:
+            move.select(piece)
+            tafl.Current.add(piece)
+            if len(move.vm) > 0:
+                valid_pieces.append((piece, list(move.vm)))
+            move.select(piece)
+            tafl.Current.empty()
+
+        if valid_pieces:
+            piece, valid_moves = random.choice(valid_pieces)
+            m = random.choice(valid_moves)
+            move.select(piece)
+            tafl.Current.add(piece)
+            if move.is_valid_move(m, tafl.Current.sprites()[0], True):
+                if tafl.Current.sprites()[0] in tafl.Kings:
+                    move.king_escaped(tafl.Kings)
+                if enable_remove:
+                    if move.a_turn:
+                        move.remove_pieces(tafl.Defenders, tafl.Attackers, tafl.Kings, king_is_special)
+                    else:
+                        move.remove_pieces(tafl.Attackers, tafl.Defenders, tafl.Kings, king_is_special)
+                game_state = game_state_to_3d_array()
+                move.end_turn(tafl.Current.sprites()[0])
+                tafl.Current.empty()
+                return game_state, 0.0  # Return neutral score for random moves
+            tafl.Current.empty()
+
+    # Phase 1: Collect all candidate (piece, move, state) tuples
+    candidates = []  # List of (piece, move_pos, game_state, vm_snapshot)
+    king_kill_candidate = None  # Track if we find a king-killing move
+
     for piece in pieces:
         if random.random() > sample_frac:
             continue
@@ -487,63 +522,78 @@ def do_best_move(move, model, game_state_cache, sample_frac=1.0, screen=None, bo
             move.select(piece)
             tafl.Current.empty()
             continue
-        else:
-            for m in move.vm:
-                if random.random() > sample_frac:
-                    continue
 
-                # Try candidate move
-                move.is_valid_move(m, tafl.Current.sprites()[0], True)
-                if enable_remove:
-                    if move.a_turn:
-                        move.remove_pieces(tafl.Defenders, tafl.Attackers, tafl.Kings, king_is_special)
-                    else:
-                        move.remove_pieces(tafl.Attackers, tafl.Defenders, tafl.Kings, king_is_special)
-                game_state = game_state_to_3d_array()
-                
-                if move.a_turn and move.king_killed:  # Move would kill king, do it.
-                    best_score = 1.0
-                    best_piece = piece
-                    best_move = m
-                    best_vm = move.vm
-                    
-                    # Display final selected move if in interactive mode
-                    if screen and board:
-                        tafl.update_image(screen, board, move, 
-                                        f"Selected move ({piece.x_tile}, {piece.y_tile})->({m[0]}, {m[1]})",
-                                        f"Score: {best_score:.2f}",
-                                        highlight_pos=m,  # Highlight the destination square
-                                        highlight_score=best_score)  # Show the final score
-                        pygame.display.flip()
-                        time.sleep(0.8)  # Slightly longer pause since this is the only visualization
-                    
-                    return game_state, best_score
-                    
-                score = model.predict(game_state.reshape(1, tafl.DIM, tafl.DIM, 3), verbose=0)[0][0] + random.gauss(0, temperature)
-                
-                # Reverse candidate move
-                move.undo(tafl.Current.sprites()[0])
+        vm_snapshot = set(move.vm)  # Snapshot valid moves for this piece
 
-                # Add small random noise to break ties
-                if score == best_score:
-                    score = score + random.uniform(-0.01, 0.01)
-                    
-                # Check for move repetition
-                if score > best_score and not next(
-                        (True for elem in itertools.islice(game_state_cache, 0, game_state_cache.maxlen) if
-                         np.array_equal(elem, game_state)), False):
-                    best_score = score
-                    best_piece = piece
-                    best_move = m
-                    best_vm = move.vm
+        for m in move.vm:
+            if random.random() > sample_frac:
+                continue
+
+            # Try candidate move
+            move.is_valid_move(m, tafl.Current.sprites()[0], True)
+            if enable_remove:
+                if move.a_turn:
+                    move.remove_pieces(tafl.Defenders, tafl.Attackers, tafl.Kings, king_is_special)
+                else:
+                    move.remove_pieces(tafl.Attackers, tafl.Defenders, tafl.Kings, king_is_special)
+
+            candidate_state = game_state_to_3d_array()
+
+            # Check for immediate win (king killed)
+            if move.a_turn and move.king_killed:
+                king_kill_candidate = (piece, m, candidate_state, vm_snapshot)
+                # Don't undo yet - we'll execute this move
+                break
+
+            # Check for move repetition before adding to candidates
+            is_repeat = next(
+                (True for elem in itertools.islice(game_state_cache, 0, game_state_cache.maxlen) if
+                 np.array_equal(elem, candidate_state)), False)
+
+            if not is_repeat:
+                candidates.append((piece, m, candidate_state, vm_snapshot))
+
+            # Reverse candidate move
+            move.undo(tafl.Current.sprites()[0])
 
         move.select(piece)
         tafl.Current.empty()
 
-    if best_piece is None or best_move is None:
+        # If we found a king-killing move, execute it immediately
+        if king_kill_candidate:
+            piece, m, candidate_state, _ = king_kill_candidate
+            best_score = 1.0
+
+            if screen and board:
+                tafl.update_image(screen, board, move,
+                                f"Selected move ({piece.x_tile}, {piece.y_tile})->({m[0]}, {m[1]})",
+                                f"Score: {best_score:.2f}",
+                                highlight_pos=m,
+                                highlight_score=best_score)
+                pygame.display.flip()
+                time.sleep(0.8)
+
+            return candidate_state, best_score
+
+    # No valid non-repeating moves found
+    if len(candidates) == 0:
         print("NO BEST MOVE! No moves at all or a Draw?")
         return game_state, 0.0
 
+    # Phase 2: Single batch prediction for all candidates
+    states_batch = np.array([c[2] for c in candidates])
+    scores = model.predict(states_batch, verbose=0).flatten()
+
+    # Add temperature noise for exploration
+    if temperature > 0:
+        scores = scores + np.random.normal(0, temperature, size=scores.shape)
+
+    # Phase 3: Select best move
+    best_idx = np.argmax(scores)
+    best_piece, best_move_pos, best_game_state, best_vm = candidates[best_idx]
+    best_score = scores[best_idx]
+
+    # Execute the best move
     move.select(best_piece)
     tafl.Current.add(best_piece)
 
@@ -551,7 +601,7 @@ def do_best_move(move, model, game_state_cache, sample_frac=1.0, screen=None, bo
         print('best vm: ', best_vm)
         print('move vm: ', move.vm)
 
-    if move.is_valid_move(best_move, tafl.Current.sprites()[0], True):
+    if move.is_valid_move(best_move_pos, tafl.Current.sprites()[0], True):
         if tafl.Current.sprites()[0] in tafl.Kings:
             move.king_escaped(tafl.Kings)
         if enable_remove:
@@ -567,75 +617,99 @@ def do_best_move(move, model, game_state_cache, sample_frac=1.0, screen=None, bo
 
         # Display final selected move if in interactive mode
         if screen and board:
-            tafl.update_image(screen, board, move, 
-                            f"Selected move ({best_piece.x_tile}, {best_piece.y_tile})->({best_move[0]}, {best_move[1]})",
+            tafl.update_image(screen, board, move,
+                            f"Selected move ({best_piece.x_tile}, {best_piece.y_tile})->({best_move_pos[0]}, {best_move_pos[1]})",
                             f"Score: {best_score:.2f}",
-                            highlight_pos=best_move,  # Highlight the chosen destination
-                            highlight_score=best_score)  # Show the final score
+                            highlight_pos=best_move_pos,
+                            highlight_score=best_score)
             pygame.display.flip()
-            time.sleep(0.8)  # Slightly longer pause since this is the only visualization
+            time.sleep(0.8)
 
         return game_state, best_score
     else:
         print("ERROR: Best move logic failed... Fix! Debugging info follows:")
-        print("BEST MOVE", best_move)
+        print("BEST MOVE", best_move_pos)
         print("Current", tafl.Current.sprites()[0], (best_piece.x_tile, best_piece.y_tile), move.row, move.col)
         print("Valid moves", move.vm)
         print("reValid moves", move.valid_moves(best_piece.special_sqs, debug=True))
-        # do_human_turn(screen, board, move)
         time.sleep(30)
         sys.exit(1)
 
 
-def initialize_random_cnn_model_3d_sonnet():
+def initialize_random_cnn_model_3d_sonnet(num_channels=3, use_batchnorm=True, learning_rate=0.001):
     """ Initialize Keras CNN model optimized for 7x7 board game learning.
-    
+
     Architecture features:
-    - Multiple channels to represent different piece types and board positions (3 channels: attacker, king, defender)
+    - Multiple channels to represent different piece types and board positions
     - Residual connections to help learn complex spatial relationships
     - Multiple convolutional layers with different kernel sizes to capture both local and broader patterns
+    - Batch normalization for training stability
     - Dropout for regularization
+
+    Args:
+        num_channels: Number of input channels (3 for legacy, 6 for enhanced encoding)
+        use_batchnorm: Whether to use batch normalization layers
     """
-    print("Initializing CNN model v2 for board game learning")
-    
-    input_shape = (tafl.DIM, tafl.DIM, 3)  # 3 channels: attacker, king, defender
+    print(f"Initializing CNN model v2 for board game learning ({num_channels} channels, batchnorm={use_batchnorm})")
+
+    input_shape = (tafl.DIM, tafl.DIM, num_channels)
     std = 0.1  # Small std to prevent score explosion through deep network
-    
+
     inputs = Input(shape=input_shape)
-    
+
     # Initial convolution block
-    x = Conv2D(64, (3, 3), padding='same', activation='relu',
+    x = Conv2D(64, (3, 3), padding='same', use_bias=not use_batchnorm,
                kernel_initializer=TruncatedNormal(mean=0.0, stddev=std))(inputs)
-    
+    if use_batchnorm:
+        x = BatchNormalization()(x)
+    x = Activation('relu')(x)
+
     # First residual block
     res = x
-    x = Conv2D(64, (3, 3), padding='same', activation='relu',
+    x = Conv2D(64, (3, 3), padding='same', use_bias=not use_batchnorm,
                kernel_initializer=TruncatedNormal(mean=0.0, stddev=std))(x)
-    x = Conv2D(64, (3, 3), padding='same',
+    if use_batchnorm:
+        x = BatchNormalization()(x)
+    x = Activation('relu')(x)
+    x = Conv2D(64, (3, 3), padding='same', use_bias=not use_batchnorm,
                kernel_initializer=TruncatedNormal(mean=0.0, stddev=std))(x)
+    if use_batchnorm:
+        x = BatchNormalization()(x)
     x = Add()([x, res])
     x = Activation('relu')(x)
-    
+
     # Pattern recognition block - different kernel sizes
     # 5x5 for broader patterns like surrounding threats
-    branch1 = Conv2D(32, (5, 5), padding='same', activation='relu',
+    branch1 = Conv2D(32, (5, 5), padding='same', use_bias=not use_batchnorm,
                      kernel_initializer=TruncatedNormal(mean=0.0, stddev=std))(x)
-    
+    if use_batchnorm:
+        branch1 = BatchNormalization()(branch1)
+    branch1 = Activation('relu')(branch1)
+
     # 3x3 for local patterns
-    branch2 = Conv2D(32, (3, 3), padding='same', activation='relu',
+    branch2 = Conv2D(32, (3, 3), padding='same', use_bias=not use_batchnorm,
                      kernel_initializer=TruncatedNormal(mean=0.0, stddev=std))(x)
-    
+    if use_batchnorm:
+        branch2 = BatchNormalization()(branch2)
+    branch2 = Activation('relu')(branch2)
+
     # 1x1 for point-wise patterns
-    branch3 = Conv2D(32, (1, 1), padding='same', activation='relu',
+    branch3 = Conv2D(32, (1, 1), padding='same', use_bias=not use_batchnorm,
                      kernel_initializer=TruncatedNormal(mean=0.0, stddev=std))(x)
-    
+    if use_batchnorm:
+        branch3 = BatchNormalization()(branch3)
+    branch3 = Activation('relu')(branch3)
+
     x = Concatenate()([branch1, branch2, branch3])
     x = Dropout(0.2)(x)
-    
+
     # Final convolution to reduce channels
-    x = Conv2D(32, (3, 3), padding='same', activation='relu',
+    x = Conv2D(32, (3, 3), padding='same', use_bias=not use_batchnorm,
                kernel_initializer=TruncatedNormal(mean=0.0, stddev=std))(x)
-    
+    if use_batchnorm:
+        x = BatchNormalization()(x)
+    x = Activation('relu')(x)
+
     # Flatten and dense layers
     x = Flatten()(x)
     x = Dense(256, activation='relu',
@@ -643,16 +717,17 @@ def initialize_random_cnn_model_3d_sonnet():
     x = Dropout(0.3)(x)
     x = Dense(128, activation='relu',
               kernel_initializer=TruncatedNormal(mean=0.0, stddev=std))(x)
-    
+
     # Final layer with tanh to bound outputs between -1 and 1
     x = Dense(1, activation='tanh',
               kernel_initializer=TruncatedNormal(mean=0.0, stddev=std))(x)
-    
+
     model = Model(inputs=inputs, outputs=x)
-    
-    optimizer = Adam(learning_rate=0.001)  # Keep learning rate moderate
+
+    optimizer = Adam(learning_rate=learning_rate)
     model.compile(optimizer=optimizer, loss='mean_squared_error')
-    
+
+    print(f"Model initialized with learning_rate={learning_rate}")
     model.summary()
     return model
 
@@ -714,25 +789,96 @@ A_DIM = 0
 D_DIM = 2
 K_DIM = 1
 
+# Global encoding setting (set by main())
+USE_ENHANCED_ENCODING = False
 
-def game_state_to_3d_array():
-    """ 3D Numpy array representation of game state for ML model.
-        2 spatial dimensions + 1 for piece type (Attacker, Defender, King).
-        We'll tuck the King Dimension in between the others.
+
+def get_exploration_temp(num_games, max_temp=0.5, min_temp=0.02, decay=5000):
+    """Calculate exploration temperature with exponential decay.
+
+    Args:
+        num_games: Number of games trained so far
+        max_temp: Starting temperature (high exploration)
+        min_temp: Minimum temperature (exploitation)
+        decay: Decay constant (higher = slower decay)
+
+    Returns:
+        Temperature value for move selection noise
     """
+    return max(min_temp, max_temp * math.exp(-num_games / decay))
+
+
+def get_epsilon(num_games, max_eps=0.3, min_eps=0.01, decay=10000):
+    """Calculate epsilon for epsilon-greedy exploration with exponential decay.
+
+    Args:
+        num_games: Number of games trained so far
+        max_eps: Starting epsilon (high random move probability)
+        min_eps: Minimum epsilon (low random move probability)
+        decay: Decay constant (higher = slower decay)
+
+    Returns:
+        Probability of making a random move
+    """
+    return max(min_eps, max_eps * math.exp(-num_games / decay))
+
+
+def game_state_to_3d_array(is_attacker_turn=True):
+    """ 3D Numpy array representation of game state for ML model.
+        2 spatial dimensions + channels for piece types and board features.
+
+        Legacy 3-channel encoding:
+        - Ch 0: Attackers
+        - Ch 1: King
+        - Ch 2: Defenders
+
+        Enhanced 6-channel encoding:
+        - Ch 0: Attackers
+        - Ch 1: King
+        - Ch 2: Defenders
+        - Ch 3: Corners (escape squares)
+        - Ch 4: Center (throne)
+        - Ch 5: Turn indicator (1=attacker turn)
+    """
+    global USE_ENHANCED_ENCODING
+
     if tafl.Attackers is None or tafl.Defenders is None or tafl.Kings is None:
         print("Game not properly initialized.  Exiting.")
         sys.exit(1)
-    arr = np.zeros((tafl.DIM, tafl.DIM, 3), dtype=int)
 
+    num_channels = 6 if USE_ENHANCED_ENCODING else 3
+    arr = np.zeros((tafl.DIM, tafl.DIM, num_channels), dtype=np.float32)
+
+    # Basic piece channels
     for p in tafl.Attackers:
         arr[p.x_tile][p.y_tile][A_DIM] = 1
     for p in tafl.Kings:
-        arr[p.x_tile][p.y_tile][K_DIM] = 1 
+        arr[p.x_tile][p.y_tile][K_DIM] = 1
     for p in tafl.Defenders:
-        arr[p.x_tile][p.y_tile][D_DIM] = 1 
+        arr[p.x_tile][p.y_tile][D_DIM] = 1
+
+    # Enhanced encoding: add board features
+    if USE_ENHANCED_ENCODING:
+        # Channel 3: Corners (escape squares for king)
+        corners = [(0, 0), (0, tafl.DIM-1), (tafl.DIM-1, 0), (tafl.DIM-1, tafl.DIM-1)]
+        for x, y in corners:
+            arr[x][y][3] = 1
+
+        # Channel 4: Center (throne - hostile to attackers)
+        center = (tafl.DIM - 1) // 2
+        arr[center][center][4] = 1
+
+        # Channel 5: Turn indicator
+        if is_attacker_turn:
+            arr[:, :, 5] = 1
 
     return arr
+
+
+def get_num_channels():
+    """Get the number of channels based on current encoding setting."""
+    global USE_ENHANCED_ENCODING
+    return 6 if USE_ENHANCED_ENCODING else 3
 
 
 def game_state_3d_to_string():
@@ -773,6 +919,25 @@ def expand_game_states_symmetries(game_states):
     game_states_temp = [np.flip(gs, axis=0) for gs in game_states]
     game_states = np.concatenate((game_states, game_states_temp))
     return game_states
+
+
+def apply_random_symmetry(game_state):
+    """Apply one random symmetry transform to a game state.
+
+    Compatible with both legacy 3-channel and enhanced 6-channel encoding.
+    Works because corners stay at corners and center stays at center
+    under any rotation/mirror of the board.
+    """
+    k = random.randint(0, 3)  # 0, 1, 2, or 3 rotations of 90 degrees
+    state = np.rot90(game_state, k)
+    if random.random() < 0.5:  # 50% chance to mirror
+        state = np.flip(state, axis=0)
+    return state
+
+
+def apply_random_symmetries_to_batch(game_states):
+    """Apply independent random symmetry to each state in a batch."""
+    return np.array([apply_random_symmetry(gs) for gs in game_states])
 
 
 def smooth_corrected_scores(corrected_scores, num_to_smooth=50):
@@ -845,36 +1010,84 @@ def smooth_corrected_scores_exp(corrected_scores, dynamic=True, decay_constant=5
         corrected_scores[i] = (corrected_scores[i] + alpha * final_outcome + advantage_reward) / (1. + alpha)
 
 
-def update_model(model, states, rewards, batch_size=32):
-    """Train the model on a batch of state-reward pairs."""
+def compute_td_targets(game_states, final_reward, gamma=0.95, model=None):
+    """Compute TD(0) targets with bootstrapped next-state values.
+
+    Args:
+        game_states: List of game state arrays from the game
+        final_reward: The actual reward at game end (+1 win, -1 loss, -0.5 draw)
+        gamma: Discount factor for future rewards
+        model: The model to use for bootstrapping (if None, uses pure MC returns)
+
+    Returns:
+        numpy array of target values for each state
+    """
+    n = len(game_states)
+    if n == 0:
+        return np.array([])
+
+    targets = np.zeros(n)
+    targets[n-1] = final_reward  # Terminal state gets actual reward
+
+    if model is not None and n >= 2:
+        # Get value predictions for all states
+        states_array = np.array(game_states)
+        # Reshape appropriately for the model
+        num_channels = states_array.shape[-1]
+        states_reshaped = states_array.reshape(-1, tafl.DIM, tafl.DIM, num_channels)
+        values = model.predict(states_reshaped, verbose=0).flatten()
+
+        # TD(0): target[i] = gamma * (-V(s_{i+1}))
+        # Negate because opponent's good position is bad for us
+        for i in range(n-2, -1, -1):
+            next_value = -values[i+1]  # Negate for opponent's perspective
+            targets[i] = gamma * next_value
+    else:
+        # Fallback to Monte Carlo returns if no model
+        for i in range(n-2, -1, -1):
+            targets[i] = gamma * targets[i+1]
+
+    return targets
+
+
+def update_model(model, states, rewards, batch_size=32, use_td=False, gamma=0.95):
+    """Train the model on a batch of state-reward pairs.
+
+    Args:
+        use_td: If True, use TD learning targets instead of smoothed rewards
+        gamma: Discount factor for TD learning
+    """
     if len(states) == 0:
         return
-        
+
     # Convert to numpy arrays
     states = np.array(states)
     rewards = np.array(rewards)
-    
+
+    # Get number of channels from the states shape
+    num_channels = states.shape[-1] if len(states.shape) == 4 else get_num_channels()
+
     # Get predictions before training for last few states
     num_debug_states = min(3, len(states))
     debug_states = states[-num_debug_states:]
-    debug_states_reshaped = debug_states.reshape(-1, tafl.DIM, tafl.DIM, 3)
+    debug_states_reshaped = debug_states.reshape(-1, tafl.DIM, tafl.DIM, num_channels)
     before_preds = model.predict(debug_states_reshaped, verbose=0)
-    
+
     # Use smaller batch size for draw games to prevent conflicting gradients
     actual_batch_size = 8 if any(abs(rewards + 0.5) < 0.01) else batch_size
-    
+
     # Train model
     history = model.fit(
-        states.reshape(-1, tafl.DIM, tafl.DIM, 3), 
+        states.reshape(-1, tafl.DIM, tafl.DIM, num_channels),
         rewards,
         batch_size=actual_batch_size,
         epochs=1,
         verbose=0
     )
-    
+
     # Get predictions after training
     after_preds = model.predict(debug_states_reshaped, verbose=0)
-    
+
     # Print debug info
     print("\nModel prediction changes after training:")
     print("State | Before  | After   | Target  | Change")
@@ -884,20 +1097,23 @@ def update_model(model, states, rewards, batch_size=32):
         before = before_preds[i][0]
         after = after_preds[i][0]
         change = after - before
-        direction = "✓" if (target > before and after > before) or (target < before and after < before) else "✗"
+        direction = "+" if (target > before and after > before) or (target < before and after < before) else "-"
         print(f"{i:5d} | {before:7.4f} | {after:7.4f} | {target:7.4f} | {change:+7.4f} {direction}")
-    
+
     return history
 
 
-def initialize_compact_model_simple():
+def initialize_compact_model_simple(num_channels=3, learning_rate=0.001):
     """ Initialize an extremely compact model specifically for 5x5 simple game mode.
     The model focuses purely on spatial relationships between pieces, particularly
     the relative positions of attacker vs king and potential blocking positions.
+
+    Args:
+        num_channels: Number of input channels (3 for legacy, 6 for enhanced encoding)
     """
-    print("Initializing minimal model for simple game mode")
-    
-    input_shape = (tafl.DIM, tafl.DIM, 3)  # 3 channels: attacker, king, defender
+    print(f"Initializing minimal model for simple game mode ({num_channels} channels)")
+
+    input_shape = (tafl.DIM, tafl.DIM, num_channels)
     std = 0.1
     
     inputs = Input(shape=input_shape)
@@ -921,11 +1137,11 @@ def initialize_compact_model_simple():
               kernel_initializer=TruncatedNormal(mean=0.0, stddev=std))(x)
     
     model = Model(inputs=inputs, outputs=x)
-    
-    # Higher learning rate for faster adaptation
-    optimizer = Adam(learning_rate=0.01)
+
+    optimizer = Adam(learning_rate=learning_rate)
     model.compile(optimizer=optimizer, loss='mean_squared_error')
-    
+
+    print(f"Model initialized with learning_rate={learning_rate}")
     model.summary()
     return model
 
@@ -943,19 +1159,54 @@ def initialize_compact_model_simple():
 @click.option('-c', '--cache-model-every', default=100, help='Cache the Keras DNN model every so many games')
 @click.option('-e/-ne', '--exit-after-cache/--no-exit-after-cache', default=False, help='Exit after model cache step to allow restart')
 @click.option('-s/-ns', '--use-symmetry/--no-symmetry', default=False,
-              help='Set to train using symmetrical board states')
+              help='Set to train using symmetrical board states (8x expansion)')
+@click.option('--probabilistic-symmetry/--no-probabilistic-symmetry', default=False,
+              help='Apply random symmetry transform to each state (alternative to --use-symmetry)')
 @click.option('-al', '--attacker-load', default=0, help='Attacker model file num to load')
 @click.option('-dl', '--defender-load', default=0, help='Defender model file num to load')
 @click.option('-sl', '--stats-load', default=0, help='Stats model file num to load')
 @click.option('-ll/-nl', '--load-latest/--not-latest', default=False, help='Set to search and use latest models/stats files')
 @click.option('-v', '--version', default=7, help='Model version number')
+# New training improvement options
+@click.option('--use-td/--no-td', default=True, help='Use TD learning instead of smoothed rewards')
+@click.option('--gamma', default=0.95, help='Discount factor for TD learning')
+@click.option('--initial-temp', default=0.5, help='Initial exploration temperature')
+@click.option('--final-temp', default=0.02, help='Final exploration temperature')
+@click.option('--temp-decay', default=5000, help='Temperature decay constant (games)')
+@click.option('--initial-epsilon', default=0.3, help='Initial epsilon for random moves')
+@click.option('--final-epsilon', default=0.01, help='Final epsilon for random moves')
+@click.option('--epsilon-decay', default=10000, help='Epsilon decay constant (games)')
+@click.option('--benchmark/--no-benchmark', default=False, help='Output timing statistics')
+@click.option('--legacy-encoding/--enhanced-encoding', default=True, help='Use legacy 3-channel encoding (default) or enhanced 6-channel')
+@click.option('--batchnorm/--no-batchnorm', default=True, help='Use batch normalization in model (default: True)')
+@click.option('--learning-rate', default=0.001, help='Learning rate for optimizer (try 0.0001 if models saturate)')
 def main(game_name, human_attacker, human_defender, interactive, train_attacker, train_defender, dynamic_train,
-         cache_model_every, exit_after_cache, use_symmetry,
-         attacker_load, defender_load, stats_load, load_latest, version):
+         cache_model_every, exit_after_cache, use_symmetry, probabilistic_symmetry,
+         attacker_load, defender_load, stats_load, load_latest, version,
+         use_td, gamma, initial_temp, final_temp, temp_decay,
+         initial_epsilon, final_epsilon, epsilon_decay, benchmark, legacy_encoding, batchnorm, learning_rate):
     """Main training loop."""
 
     global king_is_special
+    global USE_ENHANCED_ENCODING
     king_is_special = False
+
+    # Set encoding mode based on flag
+    USE_ENHANCED_ENCODING = not legacy_encoding
+    num_channels = 6 if USE_ENHANCED_ENCODING else 3
+    if USE_ENHANCED_ENCODING:
+        print(f"Using enhanced 6-channel encoding (corners, center, turn indicator)")
+    else:
+        print(f"Using legacy 3-channel encoding")
+
+    # Warn if both symmetry options are enabled
+    if use_symmetry and probabilistic_symmetry:
+        print("Warning: Both --use-symmetry and --probabilistic-symmetry are enabled.")
+        print("         Using --use-symmetry (8x expansion). Disable one for clarity.")
+    elif probabilistic_symmetry:
+        print("Using probabilistic symmetry augmentation (random transform per state)")
+    elif use_symmetry:
+        print("Using deterministic symmetry augmentation (8x expansion)")
 
     log_level = 1
 
@@ -1014,14 +1265,15 @@ def main(game_name, human_attacker, human_defender, interactive, train_attacker,
                 attacker_load = 0
         if attacker_load == 0:
             if game_name.lower() == "simple":
-                attacker_model = initialize_compact_model_simple()
+                attacker_model = initialize_compact_model_simple(num_channels=num_channels, learning_rate=learning_rate)
             else:
-                attacker_model = initialize_random_cnn_model_3d_sonnet()
+                attacker_model = initialize_random_cnn_model_3d_sonnet(num_channels=num_channels, use_batchnorm=batchnorm, learning_rate=learning_rate)
         else:
             attacker_model = load_model('{}/attacker_model_{}_games.keras'.format(save_dir, attacker_load))
             # Recompile with fresh optimizer
-            optimizer = Adam(learning_rate=0.001)
+            optimizer = Adam(learning_rate=learning_rate)
             attacker_model.compile(optimizer=optimizer, loss='mean_squared_error')
+            print(f"Attacker model reloaded with learning_rate={learning_rate}")
             num_train_games_attacker = attacker_load
 
     defender_model = None
@@ -1036,14 +1288,15 @@ def main(game_name, human_attacker, human_defender, interactive, train_attacker,
             defender_model = None  # Defaults to mostly random + some extra King movements
         elif defender_load == 0:
             if game_name.lower() == "simple":
-                defender_model = initialize_compact_model_simple()
+                defender_model = initialize_compact_model_simple(num_channels=num_channels, learning_rate=learning_rate)
             else:
-                defender_model = initialize_random_cnn_model_3d_sonnet()
+                defender_model = initialize_random_cnn_model_3d_sonnet(num_channels=num_channels, use_batchnorm=batchnorm, learning_rate=learning_rate)
         else:
             defender_model = load_model('{}/defender_model_{}_games.keras'.format(save_dir, defender_load))
             # Recompile with fresh optimizer
-            optimizer = Adam(learning_rate=0.001)
+            optimizer = Adam(learning_rate=learning_rate)
             defender_model.compile(optimizer=optimizer, loss='mean_squared_error')
+            print(f"Defender model reloaded with learning_rate={learning_rate}")
             num_train_games_defender = defender_load
 
     stats = None
@@ -1093,11 +1346,19 @@ def main(game_name, human_attacker, human_defender, interactive, train_attacker,
         else:
             train_attacker = train_attacker_orig
 
-        attacker_temp = 0.1
-        defender_temp = 0.1
+        # Calculate exploration parameters with decay
+        num_games = max(num_train_games_attacker, num_train_games_defender)
+        attacker_temp = get_exploration_temp(num_games, initial_temp, final_temp, temp_decay)
+        defender_temp = get_exploration_temp(num_games, initial_temp, final_temp, temp_decay)
+        current_epsilon = get_epsilon(num_games, initial_epsilon, final_epsilon, epsilon_decay)
+
+        if log_level > 0 and benchmark:
+            print(f"Exploration: temp={attacker_temp:.4f}, epsilon={current_epsilon:.4f}")
+
         play, a_game_states, a_corrected_scores, d_game_states, d_corrected_scores = \
             run_game(attacker_model, defender_model, human_attacker, human_defender, screen, game_name,
-                     sample_frac, attacker_temp, defender_temp, frac_attackers_to_remove, frac_defenders_to_remove)
+                     sample_frac, attacker_temp, defender_temp, frac_attackers_to_remove, frac_defenders_to_remove,
+                     epsilon=current_epsilon)
 
         end = timer()
         game_duration = end - start
@@ -1127,34 +1388,66 @@ def main(game_name, human_attacker, human_defender, interactive, train_attacker,
                 print("\nTraining attacker model:")
                 print("""Last Attacker states: {}""".format(
                       ' '.join(['{:+0.4f}'.format(entry) for entry in a_corrected_scores[-15:]])))
-            smooth_corrected_scores_exp(a_corrected_scores)
-            if log_level>0:
-                print("""            Smoothed: {}""".format(
-                      ' '.join(['{:+0.4f}'.format(entry) for entry in a_corrected_scores[-15:]])))
+
+            # Use TD learning or legacy smoothing
+            if use_td:
+                final_reward = a_corrected_scores[-1]
+                a_targets = compute_td_targets(a_game_states, final_reward, gamma=gamma, model=attacker_model)
+                if log_level>0:
+                    print("""          TD targets: {}""".format(
+                          ' '.join(['{:+0.4f}'.format(entry) for entry in a_targets[-15:]])))
+            else:
+                smooth_corrected_scores_exp(a_corrected_scores)
+                a_targets = np.array(a_corrected_scores)
+                if log_level>0:
+                    print("""            Smoothed: {}""".format(
+                          ' '.join(['{:+0.4f}'.format(entry) for entry in a_corrected_scores[-15:]])))
+
             # Convert to numpy arrays without shuffling
             a_game_states = np.array(a_game_states)
-            a_corrected_scores = np.array(a_corrected_scores)
+
+            # Symmetry augmentation (mutually exclusive options)
             if use_symmetry:
                 a_game_states = expand_game_states_symmetries(a_game_states)
-                a_corrected_scores = np.tile(a_corrected_scores, 8)
-            update_model(attacker_model, a_game_states, a_corrected_scores)
+                a_targets = np.tile(a_targets, 8)
+            elif probabilistic_symmetry:
+                a_game_states = apply_random_symmetries_to_batch(a_game_states)
+                # targets unchanged - same size batch
+
+            update_model(attacker_model, a_game_states, a_targets, use_td=use_td, gamma=gamma)
 
         if train_defender and defender_model is not None and len(d_corrected_scores) > 0:
             if log_level>0:
                 print("\nTraining defender model:")
                 print("""Last Defender states: {}""".format(
                       ' '.join(['{:+0.4f}'.format(entry) for entry in d_corrected_scores[-15:]])))
-            smooth_corrected_scores_exp(d_corrected_scores)
-            if log_level>0:
-                print("""            Smoothed: {}""".format(
-                ' '.join(['{:+0.4f}'.format(entry) for entry in d_corrected_scores[-15:]])))
+
+            # Use TD learning or legacy smoothing
+            if use_td:
+                final_reward = d_corrected_scores[-1]
+                d_targets = compute_td_targets(d_game_states, final_reward, gamma=gamma, model=defender_model)
+                if log_level>0:
+                    print("""          TD targets: {}""".format(
+                          ' '.join(['{:+0.4f}'.format(entry) for entry in d_targets[-15:]])))
+            else:
+                smooth_corrected_scores_exp(d_corrected_scores)
+                d_targets = np.array(d_corrected_scores)
+                if log_level>0:
+                    print("""            Smoothed: {}""".format(
+                          ' '.join(['{:+0.4f}'.format(entry) for entry in d_corrected_scores[-15:]])))
+
             # Convert to numpy arrays without shuffling
             d_game_states = np.array(d_game_states)
-            d_corrected_scores = np.array(d_corrected_scores)
+
+            # Symmetry augmentation (mutually exclusive options)
             if use_symmetry:
                 d_game_states = expand_game_states_symmetries(d_game_states)
-                d_corrected_scores = np.tile(d_corrected_scores, 8)
-            update_model(defender_model, d_game_states, d_corrected_scores)
+                d_targets = np.tile(d_targets, 8)
+            elif probabilistic_symmetry:
+                d_game_states = apply_random_symmetries_to_batch(d_game_states)
+                # targets unchanged - same size batch
+
+            update_model(defender_model, d_game_states, d_targets, use_td=use_td, gamma=gamma)
 
         if (stats.num_games_total() % cache_model_every == 0):  # Save every cache_model_every games
             # print('--- num games played: {}'.format(stats.num_games_total()))

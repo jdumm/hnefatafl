@@ -9,7 +9,10 @@
       "WebFetch(domain:cloud.githubusercontent.com)",
       "Bash(find:*)",
       "Bash(bash:*)",
-      "Bash(git checkout:*)"
+      "Bash(git checkout:*)",
+      "Bash(git add:*)",
+      "Bash(git commit -m \"$\\(cat <<''EOF''\nImplement training improvements for faster convergence\n\nPriority 1: Batch Inference\n- Refactor do_best_move\\(\\) to collect all candidate states first\n- Make single batched prediction call instead of per-move calls\n- Expected 50-100x speedup in move selection\n\nPriority 2: TD Learning\n- Add compute_td_targets\\(\\) for TD\\(0\\) with bootstrapped values\n- Terminal states get actual reward, earlier states use gamma * -V\\(s''\\)\n- Values negated for opponent perspective\n- New flags: --use-td \\(default\\), --gamma 0.95\n\nPriority 3: Exploration Schedule\n- Add get_exploration_temp\\(\\) and get_epsilon\\(\\) with exponential decay\n- Temperature decays from high exploration to low over training\n- New flags: --initial-temp, --final-temp, --temp-decay\n- New flags: --initial-epsilon, --final-epsilon, --epsilon-decay\n- Add --benchmark flag for timing stats\n\nPriority 4: Enhanced State Encoding\n- Support 6-channel encoding with corner/center/turn awareness\n- Ch 0-2: pieces \\(unchanged\\), Ch 3: corners, Ch 4: center, Ch 5: turn\n- New flag: --enhanced-encoding \\(default: legacy 3-channel\\)\n\nPriority 5: Batch Normalization\n- Add BatchNorm layers after Conv2D in sonnet model\n- Improves training stability\n- New flag: --no-batchnorm to disable\n\nAlso: Update CLAUDE.md with strategy section and new training options\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n\\)\")",
+      "Bash(git commit:*)"
     ]
   }
 }

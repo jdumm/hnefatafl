@@ -38,8 +38,21 @@ python hnefatafl_train.py --batch --train-attacker --train-defender --load-lates
 # Train specific variant (e.g., Brandubh 7x7)
 python hnefatafl_train.py --game-name Brandubh --train-attacker --train-defender
 
-# Set learning rate and epsilon (exploration rate)
-python hnefatafl_train.py --initial-lr 0.001 --epsilon 0.1 --lr-decay
+# TD Learning with exploration schedule (recommended)
+python hnefatafl_train.py --batch --train-attacker --train-defender --use-td --gamma 0.95
+
+# Exploration parameters (decay from high to low over training)
+python hnefatafl_train.py --initial-temp 0.5 --final-temp 0.02 --temp-decay 5000
+python hnefatafl_train.py --initial-epsilon 0.3 --final-epsilon 0.01 --epsilon-decay 10000
+
+# Enhanced 6-channel encoding (adds corner/center awareness)
+python hnefatafl_train.py --enhanced-encoding
+
+# Disable batch normalization
+python hnefatafl_train.py --no-batchnorm
+
+# Benchmark mode for timing stats
+python hnefatafl_train.py --benchmark
 
 # Control model saving frequency
 python hnefatafl_train.py --cache-model-every 50
@@ -64,17 +77,20 @@ pip install -r requirements.txt
   - Global sprite groups: `tafl.Attackers`, `tafl.Defenders`, `tafl.Kings`
 
 ### AI Training System (hnefatafl_train.py)
-- **Board State Encoding**: `game_state_to_3d_array()` creates (DIM, DIM, 3) numpy arrays
-  - 3 channels: attackers (A_DIM=0), king (K_DIM=1), defenders (D_DIM=2)
-- **Move Selection**: `do_best_move()` evaluates all legal moves using batch prediction
-  - Explores state space by trying each piece's valid moves
-  - Scores positions with the neural network
-  - Applies temperature for exploration vs exploitation
+- **Board State Encoding**: `game_state_to_3d_array()` creates numpy arrays
+  - Legacy 3-channel: attackers (A_DIM=0), king (K_DIM=1), defenders (D_DIM=2)
+  - Enhanced 6-channel: adds corners (ch3), center (ch4), turn indicator (ch5)
+- **Move Selection**: `do_best_move()` evaluates all legal moves using **batch inference**
+  - Collects all candidate states first, makes single batched prediction call
+  - Applies temperature noise for exploration (decays over training)
   - Uses epsilon-greedy strategy for random moves during training
-- **Training Loop**: Self-play stores game states and outcomes
-  - After each game, states are scored based on win/loss
-  - Models updated via gradient descent on scored positions
-  - Uses intermediate reward shaping (not just terminal states)
+- **TD Learning**: `compute_td_targets()` implements TD(0) with bootstrapped values
+  - Terminal states get actual reward (+1 win, -1 loss, -0.5 draw)
+  - Earlier states use discounted next-state value (gamma * -V(s'))
+  - Values negated because opponent's good position is bad for us
+- **Exploration Schedule**: Temperature and epsilon decay exponentially
+  - `get_exploration_temp()`: Controls move selection noise
+  - `get_epsilon()`: Controls random move probability
 - **Symmetry Augmentation**: Optional flag to train on rotated/flipped board states
 
 ### Neural Network Models (models.py)
@@ -111,19 +127,29 @@ All models:
 - `game_state_cache` dict used to avoid re-encoding identical positions during move search
 
 ### Training Strategies
+- **TD Learning**: `--use-td` enables temporal difference learning with bootstrapped values
+- **Exploration Schedule**: Temperature and epsilon decay from initial to final values over training
+- **Batch Normalization**: `--batchnorm` (default) adds BatchNorm layers for training stability
+- **Enhanced Encoding**: `--enhanced-encoding` uses 6-channel input with board feature awareness
 - **Dynamic Training**: `--dynamic-train` pauses defender training when attacker win rate is lopsided
-- **Shaping Decay**: Intermediate reward shaping decays exponentially with `exp(-games/k)`
-- **Learning Rate Decay**: `--lr-decay` reduces learning rate as training progresses
-- **Symmetry**: `--use-symmetry` trains on board rotations/reflections for data augmentation
+- **Symmetry**: Two mutually exclusive options for data augmentation:
+  - `--use-symmetry`: Expands each state into 8 copies (4 rotations × 2 mirrors) - increases batch size 8x
+  - `--probabilistic-symmetry`: Applies one random transform per state - same batch size, less correlated samples (recommended for new training runs)
 
 ### Game Variants
 The `--game-name` parameter supports:
 - `Hnefatafl`: Classic 11x11 board
-- `Brandubh`: 7x7 Irish variant
+- `Brandubh`: 7x7 Irish variant (note: inherently favors attackers ~80% win rate)
 - `simple`: Minimal 5x5 test variant
 - `brandubh_simple`: Simplified 7x7 for testing
 
 Each variant has different initial piece layouts and board dimensions configured in Board.__init__().
+
+### Game Balance Notes
+- **Brandubh** is known to favor attackers. Expect ~80% attacker win rate even with well-trained models. Training strategies to address this:
+  - Use `--dynamic-train` to pause attacker training when win rate is lopsided
+  - Consider asymmetric learning rates (higher for defender)
+  - The 7x7 board gives king fewer escape routes than larger variants
 
 ## Known Issues / Notes
 
@@ -146,3 +172,22 @@ The `move.undo()` function properly restores captured pieces using `RemovedPiece
 - Board state automatically printed at game start, after moves, and at game end
 - Press 'P' key during gameplay to print current board state on demand
 - Only prints in interactive mode (not batch training)
+
+## Basic Hnefatafl Strategy
+
+### Defender Strategy
+- **Protect escape routes**: Keep at least 2 paths to corners open
+- **King mobility**: Don't box in the king with your own pieces
+- **Use the throne**: Center is hostile to attackers but safe for defenders
+- **Sacrifice for escape**: Trading pieces to clear a corner path can win
+
+### Attacker Strategy
+- **Control corners**: Position pieces to block all 4 escape squares
+- **Create a net**: Surround the center with a ring before tightening
+- **Force king to edge**: King is easier to capture against walls
+- **Coordinate captures**: Set up sandwich attacks on defenders
+
+### Key Positions
+- **Corner control**: 2 attackers per corner can block escape
+- **Ring formation**: Attackers at distance 2-3 from center limit king movement
+- **Edge trap**: King on edge with 2 attackers = potential capture
