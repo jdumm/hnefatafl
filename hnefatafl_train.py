@@ -169,7 +169,7 @@ def do_mostly_random_but_strike_to_kill_move(move):
                 else:
                     for m in move.vm:
                         if abs(5 - m[0]) > 3 or abs(5 - m[1]) > 3:
-                            if move.is_valid_move(pos, tafl.Current.sprites()[0], True):
+                            if move.is_valid_move(m, tafl.Current.sprites()[0], True):
                                 move.king_escaped(tafl.Kings)
                             if move.a_turn:
                                 move.remove_pieces(tafl.Defenders, tafl.Attackers, tafl.Kings)
@@ -446,7 +446,7 @@ def do_best_move(move, model, game_state_cache, sample_frac=1.0, screen=None, bo
     Args:
         epsilon: Probability of making a random move (exploration)
     """
-    game_state = game_state_to_3d_array()
+    game_state = game_state_to_3d_array(is_attacker_turn=move.a_turn)
     game_state_cache.append(deepcopy(game_state))
 
     # For simple game, we want to be more focused in our exploration
@@ -503,7 +503,7 @@ def do_best_move(move, model, game_state_cache, sample_frac=1.0, screen=None, bo
                         move.remove_pieces(tafl.Defenders, tafl.Attackers, tafl.Kings, king_is_special)
                     else:
                         move.remove_pieces(tafl.Attackers, tafl.Defenders, tafl.Kings, king_is_special)
-                game_state = game_state_to_3d_array()
+                game_state = game_state_to_3d_array(is_attacker_turn=move.a_turn)
                 move.end_turn(tafl.Current.sprites()[0])
                 tafl.Current.empty()
                 return game_state, 0.0  # Return neutral score for random moves
@@ -537,7 +537,7 @@ def do_best_move(move, model, game_state_cache, sample_frac=1.0, screen=None, bo
                 else:
                     move.remove_pieces(tafl.Attackers, tafl.Defenders, tafl.Kings, king_is_special)
 
-            candidate_state = game_state_to_3d_array()
+            candidate_state = game_state_to_3d_array(is_attacker_turn=move.a_turn)
 
             # Check for immediate win (king killed)
             if move.a_turn and move.king_killed:
@@ -610,7 +610,7 @@ def do_best_move(move, model, game_state_cache, sample_frac=1.0, screen=None, bo
             else:
                 move.remove_pieces(tafl.Attackers, tafl.Defenders, tafl.Kings, king_is_special)
 
-        game_state = game_state_to_3d_array()
+        game_state = game_state_to_3d_array(is_attacker_turn=move.a_turn)
 
         move.end_turn(tafl.Current.sprites()[0])
         tafl.Current.empty()
@@ -631,12 +631,12 @@ def do_best_move(move, model, game_state_cache, sample_frac=1.0, screen=None, bo
         print("BEST MOVE", best_move_pos)
         print("Current", tafl.Current.sprites()[0], (best_piece.x_tile, best_piece.y_tile), move.row, move.col)
         print("Valid moves", move.vm)
-        print("reValid moves", move.valid_moves(best_piece.special_sqs, debug=True))
+        print("reValid moves", move.valid_moves(best_piece.special_sqs))
         time.sleep(30)
         sys.exit(1)
 
 
-def initialize_random_cnn_model_3d_sonnet(num_channels=3, use_batchnorm=True, learning_rate=0.001):
+def initialize_random_cnn_model_3d_sonnet(num_channels=8, use_batchnorm=True, learning_rate=0.001):
     """ Initialize Keras CNN model optimized for 7x7 board game learning.
 
     Architecture features:
@@ -647,7 +647,7 @@ def initialize_random_cnn_model_3d_sonnet(num_channels=3, use_batchnorm=True, le
     - Dropout for regularization
 
     Args:
-        num_channels: Number of input channels (3 for legacy, 6 for enhanced encoding)
+        num_channels: Number of input channels (8-channel encoding)
         use_batchnorm: Whether to use batch normalization layers
     """
     print(f"Initializing CNN model v2 for board game learning ({num_channels} channels, batchnorm={use_batchnorm})")
@@ -789,9 +789,6 @@ A_DIM = 0
 D_DIM = 2
 K_DIM = 1
 
-# Global encoding setting (set by main())
-USE_ENHANCED_ENCODING = False
-
 
 def get_exploration_temp(num_games, max_temp=0.5, min_temp=0.02, decay=5000):
     """Calculate exploration temperature with exponential decay.
@@ -827,26 +824,21 @@ def game_state_to_3d_array(is_attacker_turn=True):
     """ 3D Numpy array representation of game state for ML model.
         2 spatial dimensions + channels for piece types and board features.
 
-        Legacy 3-channel encoding:
-        - Ch 0: Attackers
-        - Ch 1: King
-        - Ch 2: Defenders
-
-        Enhanced 6-channel encoding:
+        8-channel encoding:
         - Ch 0: Attackers
         - Ch 1: King
         - Ch 2: Defenders
         - Ch 3: Corners (escape squares)
         - Ch 4: Center (throne)
         - Ch 5: Turn indicator (1=attacker turn)
+        - Ch 6: Attacker piece count normalized by board area
+        - Ch 7: Defender piece count normalized by board area
     """
-    global USE_ENHANCED_ENCODING
-
     if tafl.Attackers is None or tafl.Defenders is None or tafl.Kings is None:
         print("Game not properly initialized.  Exiting.")
         sys.exit(1)
 
-    num_channels = 6 if USE_ENHANCED_ENCODING else 3
+    num_channels = 8
     arr = np.zeros((tafl.DIM, tafl.DIM, num_channels), dtype=np.float32)
 
     # Basic piece channels
@@ -857,28 +849,30 @@ def game_state_to_3d_array(is_attacker_turn=True):
     for p in tafl.Defenders:
         arr[p.x_tile][p.y_tile][D_DIM] = 1
 
-    # Enhanced encoding: add board features
-    if USE_ENHANCED_ENCODING:
-        # Channel 3: Corners (escape squares for king)
-        corners = [(0, 0), (0, tafl.DIM-1), (tafl.DIM-1, 0), (tafl.DIM-1, tafl.DIM-1)]
-        for x, y in corners:
-            arr[x][y][3] = 1
+    # Channel 3: Corners (escape squares for king)
+    corners = [(0, 0), (0, tafl.DIM-1), (tafl.DIM-1, 0), (tafl.DIM-1, tafl.DIM-1)]
+    for x, y in corners:
+        arr[x][y][3] = 1
 
-        # Channel 4: Center (throne - hostile to attackers)
-        center = (tafl.DIM - 1) // 2
-        arr[center][center][4] = 1
+    # Channel 4: Center (throne - hostile to attackers)
+    center = (tafl.DIM - 1) // 2
+    arr[center][center][4] = 1
 
-        # Channel 5: Turn indicator
-        if is_attacker_turn:
-            arr[:, :, 5] = 1
+    # Channel 5: Turn indicator
+    if is_attacker_turn:
+        arr[:, :, 5] = 1
+
+    # Channels 6-7: global team piece counts (broadcast)
+    board_area = float(tafl.DIM * tafl.DIM)
+    arr[:, :, 6] = len(tafl.Attackers) / board_area
+    arr[:, :, 7] = len(tafl.Defenders) / board_area
 
     return arr
 
 
 def get_num_channels():
-    """Get the number of channels based on current encoding setting."""
-    global USE_ENHANCED_ENCODING
-    return 6 if USE_ENHANCED_ENCODING else 3
+    """Return the number of channels for game-state encoding."""
+    return 8
 
 
 def game_state_3d_to_string():
@@ -924,9 +918,9 @@ def expand_game_states_symmetries(game_states):
 def apply_random_symmetry(game_state):
     """Apply one random symmetry transform to a game state.
 
-    Compatible with both legacy 3-channel and enhanced 6-channel encoding.
-    Works because corners stay at corners and center stays at center
-    under any rotation/mirror of the board.
+    Works with the fixed 8-channel encoding because corners stay at corners,
+    center stays at center, and global count/turn channels are spatially
+    uniform under symmetry.
     """
     k = random.randint(0, 3)  # 0, 1, 2, or 3 rotations of 90 degrees
     state = np.rot90(game_state, k)
@@ -1103,13 +1097,13 @@ def update_model(model, states, rewards, batch_size=32, use_td=False, gamma=0.95
     return history
 
 
-def initialize_compact_model_simple(num_channels=3, learning_rate=0.001):
+def initialize_compact_model_simple(num_channels=8, learning_rate=0.001):
     """ Initialize an extremely compact model specifically for 5x5 simple game mode.
     The model focuses purely on spatial relationships between pieces, particularly
     the relative positions of attacker vs king and potential blocking positions.
 
     Args:
-        num_channels: Number of input channels (3 for legacy, 6 for enhanced encoding)
+        num_channels: Number of input channels (8-channel encoding)
     """
     print(f"Initializing minimal model for simple game mode ({num_channels} channels)")
 
@@ -1146,6 +1140,18 @@ def initialize_compact_model_simple(num_channels=3, learning_rate=0.001):
     return model
 
 
+def validate_model_channels(model, expected_channels, model_name):
+    """Ensure loaded model input channels match current encoding."""
+    input_shape = model.input_shape
+    if isinstance(input_shape, list):
+        input_shape = input_shape[0]
+    model_channels = input_shape[-1]
+    if model_channels != expected_channels:
+        print(f"Error: {model_name} model expects {model_channels} channels, but current encoding uses {expected_channels}.")
+        print("Hint: train/load compatible checkpoints that were built with the current 8-channel encoding.")
+        sys.exit(1)
+
+
 @click.command()
 @click.option('-g', '--game-name', default='Hnefatafl', help='Name of Tafl variant to play')
 @click.option('-ha/-aa', '--human-attacker/--ai-attacker', default=False, help='Set to play attacker manually')
@@ -1177,27 +1183,21 @@ def initialize_compact_model_simple(num_channels=3, learning_rate=0.001):
 @click.option('--final-epsilon', default=0.01, help='Final epsilon for random moves')
 @click.option('--epsilon-decay', default=10000, help='Epsilon decay constant (games)')
 @click.option('--benchmark/--no-benchmark', default=False, help='Output timing statistics')
-@click.option('--legacy-encoding/--enhanced-encoding', default=True, help='Use legacy 3-channel encoding (default) or enhanced 6-channel')
 @click.option('--batchnorm/--no-batchnorm', default=True, help='Use batch normalization in model (default: True)')
 @click.option('--learning-rate', default=0.001, help='Learning rate for optimizer (try 0.0001 if models saturate)')
 def main(game_name, human_attacker, human_defender, interactive, train_attacker, train_defender, dynamic_train,
          cache_model_every, exit_after_cache, use_symmetry, probabilistic_symmetry,
          attacker_load, defender_load, stats_load, load_latest, version,
          use_td, gamma, initial_temp, final_temp, temp_decay,
-         initial_epsilon, final_epsilon, epsilon_decay, benchmark, legacy_encoding, batchnorm, learning_rate):
+         initial_epsilon, final_epsilon, epsilon_decay, benchmark, batchnorm, learning_rate):
     """Main training loop."""
 
     global king_is_special
-    global USE_ENHANCED_ENCODING
     king_is_special = False
 
-    # Set encoding mode based on flag
-    USE_ENHANCED_ENCODING = not legacy_encoding
-    num_channels = 6 if USE_ENHANCED_ENCODING else 3
-    if USE_ENHANCED_ENCODING:
-        print(f"Using enhanced 6-channel encoding (corners, center, turn indicator)")
-    else:
-        print(f"Using legacy 3-channel encoding")
+    # Fixed encoding mode
+    num_channels = 8
+    print("Using fixed 8-channel encoding (corners, center, turn indicator, attacker count, defender count)")
 
     # Warn if both symmetry options are enabled
     if use_symmetry and probabilistic_symmetry:
@@ -1230,7 +1230,7 @@ def main(game_name, human_attacker, human_defender, interactive, train_attacker,
         print("Conflicting options human_defender={} and train_defender={}. Exiting.".format(human_defender,
                                                                                              train_defender))
         sys.exit(1)
-    if attacker_load>0 or defender_load>0 and load_latest:
+    if (attacker_load > 0 or defender_load > 0) and load_latest:
         print("Conflicting options attacker_load={} or defender_load={} with load_latest set. Exiting.".format(attacker_load,
                                                                                                                defender_load))
         sys.exit(1)
@@ -1270,6 +1270,7 @@ def main(game_name, human_attacker, human_defender, interactive, train_attacker,
                 attacker_model = initialize_random_cnn_model_3d_sonnet(num_channels=num_channels, use_batchnorm=batchnorm, learning_rate=learning_rate)
         else:
             attacker_model = load_model('{}/attacker_model_{}_games.keras'.format(save_dir, attacker_load))
+            validate_model_channels(attacker_model, num_channels, "Attacker")
             # Recompile with fresh optimizer
             optimizer = Adam(learning_rate=learning_rate)
             attacker_model.compile(optimizer=optimizer, loss='mean_squared_error')
@@ -1293,6 +1294,7 @@ def main(game_name, human_attacker, human_defender, interactive, train_attacker,
                 defender_model = initialize_random_cnn_model_3d_sonnet(num_channels=num_channels, use_batchnorm=batchnorm, learning_rate=learning_rate)
         else:
             defender_model = load_model('{}/defender_model_{}_games.keras'.format(save_dir, defender_load))
+            validate_model_channels(defender_model, num_channels, "Defender")
             # Recompile with fresh optimizer
             optimizer = Adam(learning_rate=learning_rate)
             defender_model.compile(optimizer=optimizer, loss='mean_squared_error')
