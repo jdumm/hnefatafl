@@ -1041,7 +1041,7 @@ def main(game_name, human_attacker, human_defender, interactive, train_attacker,
         if load_latest:
             model_files = glob(save_dir + '/shared_model_*_games.keras')
             if len(model_files) > 0:
-                model_load = max([int(f.split("_")[2]) for f in model_files])  # Parse filenames and get latest
+                model_load = max([int(f.split("_")[4]) for f in model_files])  # Parse filenames and get latest
             else:
                 model_load = 0
         if model_load == 0:
