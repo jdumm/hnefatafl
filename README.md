@@ -46,10 +46,101 @@ The training module can be executed using:
 python hnefatafl_train.py
 ```
 
-Options can be configured from the command line for different modes, including Player vs AI Attacker or AI Defender.  If models are configured to be trained, then they are updated after each game but only saved every 50 games (default setting).  After training, saved models can be loaded quite simply.  Explore these options using:
+Options can be configured from the command line for different modes, including human-vs-AI and AI-vs-AI. Explore all current options with:
 
 ```
 python hnefatafl_train.py --help
+```
+
+## Training architecture (current)
+- A single shared value model is used for both sides.
+- Value is attacker-perspective:
+  - `+1` attacker win
+  - `-1` defender win
+  - `-0.5` draw
+- On attacker turns the move picker maximizes value; on defender turns it minimizes value.
+- Fixed board encoding is always 8 channels:
+  - attackers, king, defenders
+  - corners, center
+  - turn channel
+  - attacker count, defender count
+
+## Model files and stats files
+- Checkpoints are saved as:
+  - `shared_model_<N>_games.keras`
+- Rolling game stats are saved as:
+  - `StatsTracker_<N>_games.pkl`
+- Use `--load-latest` to continue from the latest saved checkpoint/stats in `models_<game>_v<version>`.
+
+## Core training controls
+- `--train-model`: enable model updates after each game.
+- `--cache-model-every <N>`: save model and stats every N games.
+- `--exit-after-cache`: useful for scheduled restarts.
+- `--model-preset [auto|simple|brandubh|hnefatafl]`: select architecture preset.
+- `--use-td/--no-td`, `--gamma`: target generation mode.
+- `--probabilistic-symmetry` or `--use-symmetry`: data augmentation.
+- `--sample-frac <0..1>`: fraction of candidate pieces/moves evaluated per turn (`1.0` = strongest, slower).
+
+## Exploration controls
+- `--initial-temp`, `--final-temp`, `--temp-decay`
+- `--initial-epsilon`, `--final-epsilon`, `--epsilon-decay`
+- Current defaults:
+  - temperature: `0.5 -> 0.02`
+  - epsilon: `0.0 -> 0.0`
+- Previous epsilon defaults (older behavior):
+  - epsilon: `0.3 -> 0.01`
+- Previous temperature defaults (older behavior):
+  - temperature: `0.5 -> 0.02` (unchanged)
+
+## Scripted policy controls
+The trainer supports scripted one-ply heuristics that can be used as full policies or mixed with model play.
+
+- Side policy:
+  - `--attacker-policy [model|scripted|random]`
+  - `--defender-policy [model|scripted|random]`
+- Hybrid mix while keeping `model` policy:
+  - `--attacker-scripted-frac <0..1>`
+  - `--defender-scripted-frac <0..1>`
+  - Example: `--defender-policy model --defender-scripted-frac 0.25`
+    means 25% of defender AI turns use scripted logic, 75% model.
+- Scripted behavior knobs:
+  - `--defender-escape-turn <int>`: defender shifts from peel/attrition to king-escape focus after this move number.
+  - `--scripted-noise <float>`: adds randomness to scripted scoring to avoid deterministic play.
+
+## Logging controls
+- `--log-level 0`: minimal output.
+- `--log-level 1`: periodic summaries.
+- `--log-level 2`: detailed per-game debugging.
+- `--log-every <N>`: summary interval for log level 1.
+
+At each summary point the trainer logs policy telemetry:
+- Policy mix (window): human/model/scripted/random usage by side since last summary.
+- Policy mix (total): cumulative usage since run start.
+
+## Recommended command examples
+Continue Brandubh self-play with moderate logging:
+```
+python hnefatafl_train.py --game-name Brandubh --batch --train-model --probabilistic-symmetry --model-preset brandubh -v 46 --load-latest --cache-model-every 1000 --log-level 1 --log-every 200 --sample-frac 1.0 --initial-temp 0.5 --final-temp 0.02 --initial-epsilon 0.0 --final-epsilon 0.0 *> brandubh_v46.log
+```
+
+Model attacker vs scripted defender curriculum:
+```
+python hnefatafl_train.py --game-name Brandubh --batch --train-model --attacker-policy model --defender-policy scripted --defender-escape-turn 16 --scripted-noise 0.05 --probabilistic-symmetry --model-preset brandubh -v 47 --cache-model-every 1000 --log-level 1 --log-every 200 --sample-frac 1.0 --initial-temp 0.5 --final-temp 0.02 --initial-epsilon 0.0 --final-epsilon 0.0 *> brandubh_v47.log
+```
+
+Hybrid defender curriculum (mostly model with scripted assists):
+```
+python hnefatafl_train.py --game-name Brandubh --batch --train-model --attacker-policy model --defender-policy model --defender-scripted-frac 0.25 --defender-escape-turn 16 --model-preset brandubh -v 47 --cache-model-every 1000 --log-level 1 --log-every 200 --sample-frac 1.0 --initial-temp 0.5 --final-temp 0.02 --initial-epsilon 0.0 --final-epsilon 0.0 *> brandubh_v47_hybrid.log
+```
+
+## Plotting training curves
+Use the included plotting script to graph latest tracker data:
+```
+python plot_training_stats.py models_brandubh_v46
+```
+Optional:
+```
+python plot_training_stats.py models_brandubh_v46 --window 500 --output brandubh_v46_stats.png --show
 ```
 
 # Resources

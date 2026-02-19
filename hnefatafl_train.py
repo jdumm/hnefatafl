@@ -209,8 +209,11 @@ def do_mostly_random_but_strike_to_kill_move(move):
 
 def run_game(model=None, human_attacker=False, human_defender=False, screen=None,
              game_name='Hnefatafl', sample_frac=1.0, attacker_temp=0.1, defender_temp=0.1,
-             frac_attackers_to_remove=0, frac_defenders_to_remove=0, epsilon=0.0, log_level=1):
-    """Run one game and return states plus terminal reward from attacker perspective."""
+             frac_attackers_to_remove=0, frac_defenders_to_remove=0, epsilon=0.0, log_level=1,
+             attacker_policy="model", defender_policy="model",
+             attacker_scripted_frac=0.0, defender_scripted_frac=0.0,
+             defender_escape_turn=16, scripted_noise=0.05):
+    """Run one game and return states, terminal reward, and policy telemetry."""
     board = tafl.Board(game_name)
     move = tafl.Move()
     tafl.initialize_pieces(board)
@@ -223,6 +226,16 @@ def run_game(model=None, human_attacker=False, human_defender=False, screen=None
             tafl.Attackers.sprites()[1].kill()
     game_states = []
     game_state_cache = deque(maxlen=20)
+    telemetry = {
+        "attacker_human": 0,
+        "attacker_model": 0,
+        "attacker_scripted": 0,
+        "attacker_random": 0,
+        "defender_human": 0,
+        "defender_model": 0,
+        "defender_scripted": 0,
+        "defender_random": 0,
+    }
     play = True
     num_moves = 0
     while 1:
@@ -240,7 +253,7 @@ def run_game(model=None, human_attacker=False, human_defender=False, screen=None
         if num_moves >= 100 or (game_name.lower() == "simple" and num_moves > 4):
             if log_level >= 2:
                 print("--- Draw game after {} moves".format(num_moves))
-            return play, game_states, -0.5, num_moves
+            return play, game_states, -0.5, num_moves, telemetry
 
         if move.a_turn:
             if game_name.lower() == "simple":
@@ -248,40 +261,100 @@ def run_game(model=None, human_attacker=False, human_defender=False, screen=None
                 continue
                 # print("Attacker's Turn: Move {}".format(num_moves))
             if human_attacker:
+                telemetry["attacker_human"] += 1
                 play = do_human_turn(screen, board, move)
             elif model is None:
-                do_random_move(move)
+                if attacker_policy == "scripted" or (attacker_policy == "model" and attacker_scripted_frac >= 1.0):
+                    telemetry["attacker_scripted"] += 1
+                    game_state, _ = do_scripted_move(
+                        move, game_state_cache, num_moves=num_moves, sample_frac=sample_frac, screen=screen, board=board,
+                        enable_remove=True if game_name.lower() != 'simple' else False,
+                        defender_escape_turn=defender_escape_turn, scripted_noise=scripted_noise
+                    )
+                    game_states.append(game_state)
+                else:
+                    telemetry["attacker_random"] += 1
+                    do_random_move(move)
+                    game_states.append(game_state_to_3d_array(is_attacker_turn=move.a_turn))
             else:
                 if human_defender: time.sleep(0.5)
-                game_state, _ = do_best_move(move,
-                                             model,
-                                             game_state_cache,
-                                             sample_frac=sample_frac,
-                                             temperature=attacker_temp,
-                                             enable_remove=True if game_name.lower() != 'simple' else False,
-                                             screen=screen,
-                                             board=board,
-                                             epsilon=epsilon,
-                                             prefer_max=True)
+                use_scripted = (attacker_policy == "scripted") or (
+                    attacker_policy == "model" and attacker_scripted_frac > 0 and random.random() < attacker_scripted_frac
+                )
+                if use_scripted:
+                    telemetry["attacker_scripted"] += 1
+                    game_state, _ = do_scripted_move(
+                        move, game_state_cache, num_moves=num_moves, sample_frac=sample_frac, screen=screen, board=board,
+                        enable_remove=True if game_name.lower() != 'simple' else False,
+                        defender_escape_turn=defender_escape_turn, scripted_noise=scripted_noise
+                    )
+                elif attacker_policy == "random":
+                    telemetry["attacker_random"] += 1
+                    do_random_move(move)
+                    game_state = game_state_to_3d_array(is_attacker_turn=move.a_turn)
+                else:
+                    telemetry["attacker_model"] += 1
+                    game_state, _ = do_best_move(move,
+                                                 model,
+                                                 game_state_cache,
+                                                 sample_frac=sample_frac,
+                                                 temperature=attacker_temp,
+                                                 enable_remove=True if game_name.lower() != 'simple' else False,
+                                                 screen=screen,
+                                                 board=board,
+                                                 epsilon=epsilon,
+                                                 prefer_max=True)
                 game_states.append(game_state)
         else:
             # print("Defender's Turn: Move {}".format(num_moves))
             if human_defender:
+                telemetry["defender_human"] += 1
                 play = do_human_turn(screen, board, move)
             elif model is None:
-                do_dummy_1_defender_move(move)
+                if defender_policy == "scripted" or (defender_policy == "model" and defender_scripted_frac >= 1.0):
+                    telemetry["defender_scripted"] += 1
+                    game_state, _ = do_scripted_move(
+                        move, game_state_cache, num_moves=num_moves, sample_frac=sample_frac, screen=screen, board=board,
+                        enable_remove=True if game_name.lower() != 'simple' else False,
+                        defender_escape_turn=defender_escape_turn, scripted_noise=scripted_noise
+                    )
+                    game_states.append(game_state)
+                elif defender_policy == "random":
+                    telemetry["defender_random"] += 1
+                    do_random_move(move)
+                    game_states.append(game_state_to_3d_array(is_attacker_turn=move.a_turn))
+                else:
+                    telemetry["defender_random"] += 1
+                    do_dummy_1_defender_move(move)
+                    game_states.append(game_state_to_3d_array(is_attacker_turn=move.a_turn))
             else:
                 if human_attacker: time.sleep(0.5)
-                game_state, _ = do_best_move(move,
-                                             model,
-                                             game_state_cache,
-                                             sample_frac=sample_frac,
-                                             temperature=defender_temp,
-                                             enable_remove=True if game_name.lower() != 'simple' else False,
-                                             screen=screen,
-                                             board=board,
-                                             epsilon=epsilon,
-                                             prefer_max=False)
+                use_scripted = (defender_policy == "scripted") or (
+                    defender_policy == "model" and defender_scripted_frac > 0 and random.random() < defender_scripted_frac
+                )
+                if use_scripted:
+                    telemetry["defender_scripted"] += 1
+                    game_state, _ = do_scripted_move(
+                        move, game_state_cache, num_moves=num_moves, sample_frac=sample_frac, screen=screen, board=board,
+                        enable_remove=True if game_name.lower() != 'simple' else False,
+                        defender_escape_turn=defender_escape_turn, scripted_noise=scripted_noise
+                    )
+                elif defender_policy == "random":
+                    telemetry["defender_random"] += 1
+                    do_random_move(move)
+                    game_state = game_state_to_3d_array(is_attacker_turn=move.a_turn)
+                else:
+                    telemetry["defender_model"] += 1
+                    game_state, _ = do_best_move(move,
+                                                 model,
+                                                 game_state_cache,
+                                                 sample_frac=sample_frac,
+                                                 temperature=defender_temp,
+                                                 enable_remove=True if game_name.lower() != 'simple' else False,
+                                                 screen=screen,
+                                                 board=board,
+                                                 epsilon=epsilon,
+                                                 prefer_max=False)
                 game_states.append(game_state)
 
         if move.escaped:
@@ -295,7 +368,7 @@ def run_game(model=None, human_attacker=False, human_defender=False, screen=None
                 tafl.update_image(screen, board, move, text, text2)
                 pygame.display.flip()
             if human_attacker or human_defender: play = end_game_loop(move)
-            return play, game_states, -1.0, num_moves
+            return play, game_states, -1.0, num_moves, telemetry
         if move.king_killed:
             text = "--- King killed! Attackers win!"
             if log_level >= 2:
@@ -305,9 +378,9 @@ def run_game(model=None, human_attacker=False, human_defender=False, screen=None
                 tafl.update_image(screen, board, move, text, text2)
                 pygame.display.flip()
             if human_attacker or human_defender: play = end_game_loop(move)
-            return play, game_states, +1.0, num_moves
+            return play, game_states, +1.0, num_moves, telemetry
         if move.restart:
-            return play, game_states, 0.0, num_moves
+            return play, game_states, 0.0, num_moves, telemetry
 
 
 def end_game_loop(move):
@@ -399,6 +472,252 @@ def do_human_turn(screen, board, move):
 
         if current_turn != move.a_turn:  # turn ended
             return True
+
+
+def _all_occupied_positions():
+    occupied = set()
+    for p in tafl.Attackers:
+        occupied.add((p.x_tile, p.y_tile))
+    for p in tafl.Defenders:
+        occupied.add((p.x_tile, p.y_tile))
+    for p in tafl.Kings:
+        occupied.add((p.x_tile, p.y_tile))
+    return occupied
+
+
+def _piece_position_sets():
+    attackers = {(p.x_tile, p.y_tile) for p in tafl.Attackers}
+    defenders = {(p.x_tile, p.y_tile) for p in tafl.Defenders}
+    kings = {(p.x_tile, p.y_tile) for p in tafl.Kings}
+    defender_side = defenders.union(kings)
+    return attackers, defender_side, kings
+
+
+def _hostile_open(pos, occupied):
+    return pos in tafl.SPECIALSQS and pos not in occupied
+
+
+def _estimate_threatened_count(side):
+    """Approximate count of pieces under threat of one-ply capture."""
+    occupied = _all_occupied_positions()
+    attackers, defenders_with_king, _ = _piece_position_sets()
+    if side == "attacker":
+        targets = attackers
+        enemies = defenders_with_king
+    else:
+        targets = defenders_with_king
+        enemies = attackers
+
+    threatened = 0
+    for x, y in targets:
+        is_threat = False
+        for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+            ax = (x + dx, y + dy)
+            bx = (x - dx, y - dy)
+            a_enemy_or_hostile = (ax in enemies) or _hostile_open(ax, occupied)
+            b_enemy_or_hostile = (bx in enemies) or _hostile_open(bx, occupied)
+            a_open = ax not in occupied
+            b_open = bx not in occupied
+            # Approximate one-ply capture pressure without full tree search.
+            if (a_enemy_or_hostile and b_open) or (b_enemy_or_hostile and a_open):
+                is_threat = True
+                break
+        if is_threat:
+            threatened += 1
+    return threatened
+
+
+def _king_distance_and_mobility():
+    if len(tafl.Kings.sprites()) == 0:
+        return 0.0, 0.0
+    occupied = _all_occupied_positions()
+    king = tafl.Kings.sprites()[0]
+    kx, ky = king.x_tile, king.y_tile
+    corners = [(0, 0), (0, tafl.DIM - 1), (tafl.DIM - 1, 0), (tafl.DIM - 1, tafl.DIM - 1)]
+    min_corner_dist = min(abs(kx - cx) + abs(ky - cy) for cx, cy in corners)
+    mobility = 0
+    for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+        x, y = kx + dx, ky + dy
+        while 0 <= x < tafl.DIM and 0 <= y < tafl.DIM:
+            if (x, y) in occupied:
+                break
+            mobility += 1
+            x += dx
+            y += dy
+    return float(min_corner_dist), mobility
+
+
+def _king_escape_potential():
+    if len(tafl.Kings.sprites()) == 0:
+        return 0.0
+    occupied = _all_occupied_positions()
+    king = tafl.Kings.sprites()[0]
+    kx, ky = king.x_tile, king.y_tile
+    potential = 0
+    # Number of unobstructed rays to board edge, a proxy for breakout options.
+    for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+        x, y = kx + dx, ky + dy
+        clear = True
+        while 0 <= x < tafl.DIM and 0 <= y < tafl.DIM:
+            if (x, y) in occupied:
+                clear = False
+                break
+            x += dx
+            y += dy
+        if clear:
+            potential += 1
+    return float(potential)
+
+
+def _average_adjacent_allies(side):
+    attackers, defenders_with_king, _ = _piece_position_sets()
+    positions = attackers if side == "attacker" else defenders_with_king
+    if not positions:
+        return 0.0
+    total = 0
+    for x, y in positions:
+        cnt = 0
+        for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+            if (x + dx, y + dy) in positions:
+                cnt += 1
+        total += cnt
+    return float(total) / float(len(positions))
+
+
+def _scripted_score(move, was_attacker_turn, num_moves, defender_escape_turn):
+    """Heuristic score for scripted policy; higher is better for side that just moved."""
+    if was_attacker_turn:
+        if move.king_killed:
+            return 1e9
+        if move.escaped:
+            return -1e9
+        captures = len(tafl.RemovedDefenders) + len(tafl.RemovedKings)
+        losses = len(tafl.RemovedAttackers)
+        th_def = _estimate_threatened_count("defender")
+        th_att = _estimate_threatened_count("attacker")
+        king_dist, king_mob = _king_distance_and_mobility()
+        king_escape = _king_escape_potential()
+        cohesion = _average_adjacent_allies("attacker")
+        score = 0.0
+        score += 55.0 * captures - 35.0 * losses
+        score += 7.0 * (th_def - th_att)
+        score += 2.2 * king_dist - 2.0 * king_mob - 2.0 * king_escape
+        score += 0.8 * cohesion
+        return score
+    else:
+        if move.escaped:
+            return 1e9
+        if move.king_killed:
+            return -1e9
+        captures = len(tafl.RemovedAttackers)
+        losses = len(tafl.RemovedDefenders) + len(tafl.RemovedKings)
+        th_att = _estimate_threatened_count("attacker")
+        th_def = _estimate_threatened_count("defender")
+        king_dist, king_mob = _king_distance_and_mobility()
+        king_escape = _king_escape_potential()
+        cohesion = _average_adjacent_allies("defender")
+        score = 0.0
+        score += 45.0 * captures - 30.0 * losses
+        score += 6.5 * (th_att - th_def)
+        score += 0.6 * cohesion
+        if num_moves < defender_escape_turn:
+            # Early game: peel attackers and maintain safety near king.
+            score += 1.2 * captures + 0.8 * (th_att - th_def)
+            score += -0.5 * king_dist + 0.8 * king_mob + 0.5 * king_escape
+        else:
+            # Mid/late game: prioritize king breakout and escape lanes.
+            score += -3.5 * king_dist + 2.8 * king_mob + 2.5 * king_escape
+        return score
+
+
+def do_scripted_move(move, game_state_cache, num_moves=0, sample_frac=1.0, screen=None, board=None,
+                     enable_remove=True, defender_escape_turn=16, scripted_noise=0.05):
+    """Select a move via one-ply scripted heuristics."""
+    if move.a_turn:
+        pieces = tafl.Attackers
+    else:
+        pieces = tafl.Defenders
+
+    if len(pieces) == 0:
+        return game_state_to_3d_array(is_attacker_turn=move.a_turn), 0.0
+
+    candidates = []  # (score, piece, move_pos, state, vm_snapshot)
+    start_state = game_state_to_3d_array(is_attacker_turn=move.a_turn)
+
+    for piece in pieces:
+        if random.random() > sample_frac:
+            continue
+        move.select(piece)
+        tafl.Current.add(piece)
+        if len(move.vm) == 0:
+            move.select(piece)
+            tafl.Current.empty()
+            continue
+
+        vm_snapshot = set(move.vm)
+        for m in move.vm:
+            if random.random() > sample_frac:
+                continue
+            was_attacker_turn = move.a_turn
+            move.is_valid_move(m, tafl.Current.sprites()[0], True)
+            if enable_remove:
+                if move.a_turn:
+                    move.remove_pieces(tafl.Defenders, tafl.Attackers, tafl.Kings, king_is_special)
+                else:
+                    move.remove_pieces(tafl.Attackers, tafl.Defenders, tafl.Kings, king_is_special)
+            candidate_state = game_state_to_3d_array(is_attacker_turn=move.a_turn)
+
+            is_repeat = next(
+                (True for elem in itertools.islice(game_state_cache, 0, game_state_cache.maxlen)
+                 if np.array_equal(elem, candidate_state)),
+                False
+            )
+            repeat_penalty = -8.0 if is_repeat else 0.0
+            score = _scripted_score(move, was_attacker_turn, num_moves, defender_escape_turn) + repeat_penalty
+            if scripted_noise > 0:
+                score += random.gauss(0.0, scripted_noise)
+            candidates.append((score, piece, m, candidate_state, vm_snapshot))
+
+            move.undo(tafl.Current.sprites()[0])
+
+        move.select(piece)
+        tafl.Current.empty()
+
+    if not candidates:
+        do_random_move(move)
+        return start_state, 0.0
+
+    candidates.sort(key=lambda x: x[0], reverse=True)
+    best_score, best_piece, best_move_pos, best_state, best_vm = candidates[0]
+
+    move.select(best_piece)
+    tafl.Current.add(best_piece)
+    if best_vm != move.vm:
+        pass
+    if move.is_valid_move(best_move_pos, tafl.Current.sprites()[0], True):
+        if tafl.Current.sprites()[0] in tafl.Kings:
+            move.king_escaped(tafl.Kings)
+        if enable_remove:
+            if move.a_turn:
+                move.remove_pieces(tafl.Defenders, tafl.Attackers, tafl.Kings, king_is_special)
+            else:
+                move.remove_pieces(tafl.Attackers, tafl.Defenders, tafl.Kings, king_is_special)
+        game_state = game_state_to_3d_array(is_attacker_turn=move.a_turn)
+        move.end_turn(tafl.Current.sprites()[0])
+        tafl.Current.empty()
+
+        if screen and board:
+            tafl.update_image(screen, board, move,
+                              f"Scripted move ({best_piece.x_tile}, {best_piece.y_tile})->({best_move_pos[0]}, {best_move_pos[1]})",
+                              f"Score: {best_score:.2f}",
+                              highlight_pos=best_move_pos,
+                              highlight_score=best_score)
+            pygame.display.flip()
+            time.sleep(0.35)
+        return game_state, best_score
+
+    tafl.Current.empty()
+    return start_state, 0.0
 
 
 def do_best_move(move, model, game_state_cache, sample_frac=1.0, screen=None, board=None, enable_remove=True,
@@ -945,14 +1264,28 @@ def update_model(model, states, rewards, batch_size=32, use_td=False, gamma=0.95
 @click.option('--initial-temp', default=0.5, help='Initial exploration temperature')
 @click.option('--final-temp', default=0.02, help='Final exploration temperature')
 @click.option('--temp-decay', default=5000, help='Temperature decay constant (games)')
-@click.option('--initial-epsilon', default=0.3, help='Initial epsilon for random moves')
-@click.option('--final-epsilon', default=0.01, help='Final epsilon for random moves')
+@click.option('--initial-epsilon', default=0.0, help='Initial epsilon for random moves')
+@click.option('--final-epsilon', default=0.0, help='Final epsilon for random moves')
 @click.option('--epsilon-decay', default=10000, help='Epsilon decay constant (games)')
+@click.option('--sample-frac', default=1.0, type=click.FloatRange(0.0, 1.0),
+              help='Fraction of candidate pieces/moves to evaluate each turn (1.0 = strongest).')
 @click.option('--benchmark/--no-benchmark', default=False, help='Output timing statistics')
 @click.option('--batchnorm/--no-batchnorm', default=True, help='Use batch normalization in model (default: True)')
 @click.option('--learning-rate', default=0.001, help='Learning rate for optimizer (try 0.0001 if models saturate)')
 @click.option('--model-preset', type=click.Choice(['auto', 'simple', 'brandubh', 'hnefatafl'], case_sensitive=False),
               default='auto', help='Model preset override. Defaults to auto selection from game mode.')
+@click.option('--attacker-policy', type=click.Choice(['model', 'scripted', 'random'], case_sensitive=False),
+              default='model', help='Policy used for attacker-side AI turns.')
+@click.option('--defender-policy', type=click.Choice(['model', 'scripted', 'random'], case_sensitive=False),
+              default='model', help='Policy used for defender-side AI turns.')
+@click.option('--attacker-scripted-frac', default=0.0, type=click.FloatRange(0.0, 1.0),
+              help='If attacker policy is model, probability of using scripted move instead (hybrid).')
+@click.option('--defender-scripted-frac', default=0.0, type=click.FloatRange(0.0, 1.0),
+              help='If defender policy is model, probability of using scripted move instead (hybrid).')
+@click.option('--defender-escape-turn', default=16, type=click.IntRange(1, 200),
+              help='Scripted defender switches from peel to escape focus after this move number.')
+@click.option('--scripted-noise', default=0.05, type=click.FloatRange(0.0, 2.0),
+              help='Stddev of Gaussian noise added to scripted move scores (higher = more variety).')
 @click.option('--log-level', default=1, type=click.IntRange(0, 2),
               help='Logging verbosity: 0=minimal, 1=periodic summaries, 2=per-game debug')
 @click.option('--log-every', default=100, type=click.IntRange(1, 1000000),
@@ -961,7 +1294,9 @@ def main(game_name, human_attacker, human_defender, interactive, train_attacker,
          cache_model_every, exit_after_cache, use_symmetry, probabilistic_symmetry,
          attacker_load, defender_load, model_load, stats_load, load_latest, version,
          use_td, gamma, initial_temp, final_temp, temp_decay,
-         initial_epsilon, final_epsilon, epsilon_decay, benchmark, batchnorm, learning_rate, model_preset,
+         initial_epsilon, final_epsilon, epsilon_decay, sample_frac, benchmark, batchnorm, learning_rate, model_preset,
+         attacker_policy, defender_policy, attacker_scripted_frac, defender_scripted_frac,
+         defender_escape_turn, scripted_noise,
          log_level, log_every):
     """Main training loop."""
 
@@ -973,6 +1308,12 @@ def main(game_name, human_attacker, human_defender, interactive, train_attacker,
     print("Using fixed 8-channel encoding (corners, center, turn indicator, attacker count, defender count)")
     effective_preset = resolve_model_preset(game_name, model_preset=model_preset)
     print(f"Using model preset '{effective_preset}' (requested: {model_preset}, game: {game_name.lower()})")
+    attacker_policy = attacker_policy.lower()
+    defender_policy = defender_policy.lower()
+    print(
+        f"Policies: attacker={attacker_policy} (scripted_frac={attacker_scripted_frac:.2f}), "
+        f"defender={defender_policy} (scripted_frac={defender_scripted_frac:.2f})"
+    )
 
     # Warn if both symmetry options are enabled
     if use_symmetry and probabilistic_symmetry:
@@ -1036,8 +1377,11 @@ def main(game_name, human_attacker, human_defender, interactive, train_attacker,
     if not human_attacker or not human_defender: os.makedirs(save_dir, exist_ok=True)
 
     has_ai_player = (not human_attacker) or (not human_defender)
+    attacker_uses_model = (not human_attacker) and attacker_policy == "model" and attacker_scripted_frac < 1.0
+    defender_uses_model = (not human_defender) and defender_policy == "model" and defender_scripted_frac < 1.0
+    needs_model = train_model or attacker_uses_model or defender_uses_model
     model = None
-    if has_ai_player:
+    if has_ai_player and needs_model:
         if load_latest:
             model_files = glob(save_dir + '/shared_model_*_games.keras')
             if len(model_files) > 0:
@@ -1073,6 +1417,17 @@ def main(game_name, human_attacker, human_defender, interactive, train_attacker,
         stats = StatsTracker(200)
 
     play = True
+    telemetry_total = {
+        "attacker_human": 0,
+        "attacker_model": 0,
+        "attacker_scripted": 0,
+        "attacker_random": 0,
+        "defender_human": 0,
+        "defender_model": 0,
+        "defender_scripted": 0,
+        "defender_random": 0,
+    }
+    telemetry_window = telemetry_total.copy()
     while play:
         if train_model:
             num_train_games_model += 1
@@ -1105,20 +1460,29 @@ def main(game_name, human_attacker, human_defender, interactive, train_attacker,
         if log_level >= 2 and benchmark:
             print(f"Exploration: temp={attacker_temp:.4f}, epsilon={current_epsilon:.4f}")
 
-        play, game_states, final_reward, num_moves_game = run_game(
+        play, game_states, final_reward, num_moves_game, game_telemetry = run_game(
             model=model,
             human_attacker=human_attacker,
             human_defender=human_defender,
             screen=screen,
             game_name=game_name,
-            sample_frac=0.90,
+            sample_frac=sample_frac,
             attacker_temp=attacker_temp,
             defender_temp=defender_temp,
             frac_attackers_to_remove=frac_attackers_to_remove,
             frac_defenders_to_remove=frac_defenders_to_remove,
             epsilon=current_epsilon,
             log_level=log_level,
+            attacker_policy=attacker_policy,
+            defender_policy=defender_policy,
+            attacker_scripted_frac=attacker_scripted_frac,
+            defender_scripted_frac=defender_scripted_frac,
+            defender_escape_turn=defender_escape_turn,
+            scripted_noise=scripted_noise,
         )
+        for k, v in game_telemetry.items():
+            telemetry_total[k] += v
+            telemetry_window[k] += v
 
         end = timer()
         game_duration = end - start
@@ -1135,6 +1499,24 @@ def main(game_name, human_attacker, human_defender, interactive, train_attacker,
                 """Model has played:        {} games,\nNum moves this game:     {} ({:0.3f} sec)"""
                 .format(num_train_games_model, num_moves_game, game_duration))
             print(stats)
+
+            def fmt_side(prefix, data):
+                side_total = data[f"{prefix}_human"] + data[f"{prefix}_model"] + data[f"{prefix}_scripted"] + data[f"{prefix}_random"]
+                if side_total <= 0:
+                    return "n/a"
+                h = 100.0 * data[f"{prefix}_human"] / side_total
+                m = 100.0 * data[f"{prefix}_model"] / side_total
+                s = 100.0 * data[f"{prefix}_scripted"] / side_total
+                r = 100.0 * data[f"{prefix}_random"] / side_total
+                return f"human={h:4.1f}% model={m:4.1f}% scripted={s:4.1f}% random={r:4.1f}%"
+
+            print("Policy mix (window):")
+            print(f"  attacker: {fmt_side('attacker', telemetry_window)}")
+            print(f"  defender: {fmt_side('defender', telemetry_window)}")
+            print("Policy mix (total):")
+            print(f"  attacker: {fmt_side('attacker', telemetry_total)}")
+            print(f"  defender: {fmt_side('defender', telemetry_total)}")
+            telemetry_window = {k: 0 for k in telemetry_window}
 
         if train_model and model is not None and len(game_states) > 0:
             if log_level >= 2:
